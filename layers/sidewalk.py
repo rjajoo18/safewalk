@@ -38,6 +38,15 @@ UTM16N = "EPSG:32616"
 # street, loose enough to catch sidewalks on either side of an arterial.
 ARC_BUFFER_M = 6.0
 
+# Below this segment length, the ARC overlap fraction is unreliable —
+# very short segments (tail merges, intersection geometry artifacts) can
+# be fully covered by a curb return or driveway apron in the ARC layer
+# and score 1.0 despite no real walkable sidewalk along their length.
+# Surfaced by the 2026-06-15 spot-check, pick #5: a 4.8 m segment scored
+# 1.0 from ARC alone with no sidewalk visible on Street View.
+# Short segments fall back to the OSM signal alone (no ARC contribution).
+MIN_SCORE_LENGTH_M = 8.0
+
 _OSM_SIDEWALK_YES = {"yes", "both", "left", "right", "separate"}
 _OSM_SIDEWALK_NO = {"no", "none"}
 _OSM_PED_HIGHWAY = {"footway", "path", "pedestrian", "steps"}
@@ -104,6 +113,9 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
          - OSM=unknown → arc_frac                  → range [0.0, 1.0]
                          (per TASKS line 23: missing tag ≠ 'no'; 0 only when
                          ARC also shows no coverage)
+      4. Short-segment override (length < MIN_SCORE_LENGTH_M): use OSM
+         signal alone, no ARC contribution. Prevents intersection-tail
+         false positives where ARC linework crosses a sub-meter sliver.
 
     Output index matches `segments.index` (assumed to be `segment_id`).
     """
@@ -128,7 +140,11 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
     osm_signals = [_osm_signal(row) for _, row in segments.iterrows()]
 
     out = []
-    for sig, frac in zip(osm_signals, arc_frac):
+    for L, sig, frac in zip(seg_lengths, osm_signals, arc_frac):
+        if L < MIN_SCORE_LENGTH_M:
+            # Short segment — arc_frac unreliable. OSM signal alone, no ARC bump.
+            out.append(0.6 if sig == "yes" else 0.0)
+            continue
         if sig == "yes":
             out.append(0.6 + 0.4 * frac)
         elif sig == "no":

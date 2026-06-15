@@ -65,13 +65,16 @@ SPEED_FACTOR_MID = 0.60    # 35–44 mph
 SPEED_FACTOR_HIGH = 1.00   # ≥ 45 mph
 
 # Default speed risk when `maxspeed` is missing (TASKS.md line 32).
+# Primary roads in urban Atlanta have signals every few blocks and typically
+# run 35-40 mph, not 45+; defaulting to 1.0 over-scored Jonesboro Rd in the
+# 2026-06-15 spot-check (pick #7). Dropped to 0.80 (high-MID territory).
 CLASS_SPEED_DEFAULT = {
     "footway": 0.0, "path": 0.0, "pedestrian": 0.0, "steps": 0.0,
     "living_street": 0.0, "service": 0.0,
     "residential": 0.20, "unclassified": 0.20,
     "tertiary": 0.60, "tertiary_link": 0.60,
     "secondary": 0.60, "secondary_link": 0.60,
-    "primary": 1.00, "primary_link": 1.00,
+    "primary": 0.80, "primary_link": 0.80,
 }
 CLASS_SPEED_DEFAULT_FALLBACK = 0.40
 
@@ -90,6 +93,9 @@ CLASS_AADT_DEFAULT_FALLBACK = 0.40
 W_CLASS = 0.40
 W_SPEED = 0.30
 W_AADT = 0.30
+
+# AADT sigmoid output is capped at this value (see _aadt_factor docstring).
+AADT_FACTOR_CAP = 0.80
 
 # --- AADT snap distance (m) ----------------------------------------------
 # Stations are snapped to the nearest segment within this radius in EPSG:32616.
@@ -178,19 +184,35 @@ def _speed_factor(mph: float | None, highway: str) -> float:
 
 
 def _aadt_factor(aadt) -> float | None:
-    """Sigmoid risk curve: ≈0 below 5k AADT, 0.5 at 17.5k, ≈1 by 30k.
+    """Sigmoid risk curve: ≈0 below 5k AADT, 0.5 at 22.5k, capped at 0.80.
+
+    Capped at 0.80 (not 1.0) because at very high AADT, real pedestrian risk
+    is mitigated by road-design factors we don't observe — signals, refuge
+    medians, dedicated sidewalks. Saturating to 1.0 over-scored Jonesboro Rd
+    (AADT 27,100) in the 2026-06-15 spot-check (pick #7); the user read 0.6
+    while the algorithm read 0.92.
+
+    Midpoint shifted from 17.5k → 22.5k, slope softened from 4k → 5k. New
+    behavior:
+      - 5k AADT  → ~0.030
+      - 15k     → ~0.182
+      - 22.5k   → 0.500
+      - 27k     → 0.711
+      - 30k     → 0.800 (cap)
+      - 35k+    → 0.800 (cap, hard)
 
     Returns None when AADT is missing — caller falls back to class default.
     """
     if aadt is None or pd.isna(aadt):
         return None
     a = float(aadt)
-    if a >= 30_000.0:
-        return 1.0
     if a <= 0.0:
         return 0.0
-    x = (a - 17_500.0) / 4_000.0   # ±3.125σ at the 5k / 30k breakpoints
-    return 1.0 / (1.0 + math.exp(-x))
+    if a >= 35_000.0:
+        return AADT_FACTOR_CAP
+    x = (a - 22_500.0) / 5_000.0
+    raw = 1.0 / (1.0 + math.exp(-x))
+    return min(raw, AADT_FACTOR_CAP)
 
 
 # =========================================================================
