@@ -20,18 +20,19 @@ seed data — which feeds both the frontend live map and the hazards scoring lay
 
 **Primary Dependencies**:
 - `geopandas>=1.0`, `shapely>=2.0` — spatial join, buffering, segment-level ops
-- `rasterio>=1.3`, `rasterstats>=0.20` — zonal stats for canopy/heat/slope rasters
+- `rioxarray>=0.15` / `rasterio>=1.3` — read the Meta/WRI canopy-height COG over HTTP (canopy)
 - `pyarrow>=18.0` — GeoParquet I/O (already in requirements.txt)
-- `httpx>=0.27` — SeeClickFix Open311 JSON pull (already in requirements.txt)
+- `httpx>=0.27` — OpenMeteo (heat + slope elevation) and FEMA NFHL REST pulls (already in requirements.txt)
 - `supabase>=2.0` — Python client for reading gap_reports into GeoDataFrame at bake time
 
 **Storage**:
 - `backend/data/scored_segments.parquet` — output GeoParquet (R3 base + R4 overlay columns)
 - `backend/data/Crashes_2020-2024.geojson` — crash point data (already present)
-- `backend/data/meta_canopy.tif` — Meta/WRI 1 m canopy height raster (to download)
-- `backend/data/capa_heat.tif` — NIHHIS-CAPA Atlanta heat-vulnerability raster (to download)
-- `backend/data/dem.tif` — USGS 3DEP DEM for slope computation (to download)
+- `backend/data/ATL311_Service_Requests.geojson` — Atlanta 311 sidewalk reports (already present)
 - Supabase managed Postgres + PostGIS — `gap_reports` table
+- Remote data services, read at bake time (no local raster files): Meta/WRI 1 m
+  canopy-height COG over HTTP (canopy), OpenMeteo ERA5 archive API (heat exposure),
+  OpenMeteo Elevation API (slope), FEMA NFHL REST (flooding)
 
 **Testing**: pytest (unit tests for factor modules using synthetic GeoDataFrames)
 
@@ -42,7 +43,9 @@ seed data — which feeds both the frontend live map and the hazards scoring lay
 **Performance Goals**: Full corridor prebake completes in under 5 minutes on a laptop
 
 **Constraints**:
-- All rasters downloaded to `backend/data/` before bake — no runtime raster fetching
+- Remote data services are read only at bake time; request-time serving uses only
+  the pre-baked parquet (offline-safe). Each remote read degrades to a documented
+  null default, so the bake never hard-fails without network.
 - R4 modules must not import from `app/` (no circular deps with the FastAPI service)
 - Factor modules are pure functions: `score(segments: GeoDataFrame) -> pd.Series`
 - Must publish a sample parquet (with real R4 columns on a small subset) by hour 1
@@ -60,7 +63,7 @@ seed data — which feeds both the frontend live map and the hazards scoring lay
 | III. Contract-First Parallel Development | ✅ Pass | Factor module interface locked: `score(segments) -> Series`. Gap-reports schema locked. Verify against R3 in hour 1. |
 | IV. MVP Discipline | ✅ Pass | Core = crash + hazards + canopy + exposure + slope + gap_reports. Flooding = stretch only. |
 | V. Data Honesty & Null Transparency | ✅ Pass | All null defaults documented in spec SC-005; must also appear as inline comments in each factor module. |
-| VI. Offline-First Demo Resilience | ✅ Pass | All rasters pre-downloaded. 311 pull is optional at bake time (no live requests during demo). |
+| VI. Offline-First Demo Resilience | ✅ Pass | Environmental factors read remote services at bake time only, each degrading to a documented null default; the demo serves from the pre-baked parquet with no live requests. |
 
 No complexity violations. No Complexity Tracking table required.
 
@@ -88,20 +91,18 @@ backend/specs/001-r4-data-overlay/
 backend/
 ├── layers/                        # R4-owned factor modules (new)
 │   ├── __init__.py
-│   ├── crash.py                   # crash_norm from Crashes_2020-2024.geojson
-│   ├── hazards.py                 # hazard_norm from Open311 ∪ gap_reports (max-not-sum)
-│   ├── canopy.py                  # canopy_pct from Meta/WRI 1 m raster
-│   ├── exposure.py                # exposure_norm from CAPA heat raster (+ optional EJScreen)
-│   ├── slope.py                   # slope_risk + barrier flag from DEM
-│   └── flooding.py                # flooding_risk — stretch, skip if no time
+│   ├── crash.py                   # crash_norm from Crashes_2020-2024.geojson (KABCO-weighted)
+│   ├── hazards.py                 # hazard_norm from ATL311 ∪ gap_reports (max-not-sum)
+│   ├── canopy.py                  # canopy_pct from Meta/WRI 1 m canopy-height COG (HTTP)
+│   ├── exposure.py                # exposure_norm (heat) from OpenMeteo ERA5 API
+│   ├── slope.py                   # slope_risk + barrier from OpenMeteo Elevation API
+│   └── flooding.py                # flooding_risk from FEMA NFHL REST — stretch
 ├── supabase/                      # R4-owned DB setup (new)
 │   ├── schema.sql                 # gap_reports table, index, RLS, realtime publication
 │   └── seed.sql                   # 5-10 demo gap pins on the Gillem corridor
-├── data/                          # R4 contributes new raster/vector files here
-│   ├── Crashes_2020-2024.geojson  # already present ✅
-│   ├── meta_canopy.tif            # to download — Meta/WRI 1 m canopy height
-│   ├── capa_heat.tif              # to download — NIHHIS-CAPA Atlanta heat raster
-│   └── dem.tif                    # to download — USGS 3DEP or Mapbox Terrain-RGB
+├── data/                          # R4 input vector files (no local rasters)
+│   ├── Crashes_2020-2024.geojson  # already present ✅ — crash_norm source
+│   └── ATL311_Service_Requests.geojson  # already present ✅ — hazard_norm (Atlanta 311)
 ├── app/                           # R2-owned — R4 does NOT modify these files
 │   ├── scoring.py                 # already maps crash_norm, hazard_norm, etc.
 │   └── segments.py                # already lists R4 columns in SEGMENT_COLUMNS

@@ -4,8 +4,8 @@ Data source: FEMA National Flood Hazard Layer (NFHL) REST API
              Layer 28 — Special Flood Hazard Areas (SFHA)
              Queried for Clayton County / Gillem Corridor bbox at runtime.
 
-Method: Fetch SFHA polygons, intersect with segment geometries, return True
-        for any segment that overlaps a flood zone.
+Method: Fetch SFHA polygons, intersect with segment geometries, return 1.0
+        for any segment that overlaps a flood zone, else 0.0.
 
 NOTE: NFHL captures riverine and coastal flood zones (100-year/500-year) but
       does NOT capture urban pluvial (flash) flooding from impervious surface
@@ -13,7 +13,7 @@ NOTE: NFHL captures riverine and coastal flood zones (100-year/500-year) but
       rain. Treat this as a directional signal only; False does not mean no
       flood risk.
 
-Null policy: API unreachable or empty response → all False
+Null policy: API unreachable or empty response → all 0.0
              (unknown flood risk treated conservatively as no recorded zone;
              callers should weight flooding as supplemental, not blocking)
 """
@@ -64,31 +64,31 @@ def _fetch_flood_zones() -> gpd.GeoDataFrame | None:
 
 
 def score(segments: gpd.GeoDataFrame) -> pd.Series:
-    """Return flood zone membership indexed by segment_id.
+    """Return flood zone membership in [0, 1] indexed by segment_id.
 
-    True  = segment intersects a FEMA Special Flood Hazard Area (100-yr zone)
-    False = no intersection found, or API unavailable
+    1.0 = segment intersects a FEMA Special Flood Hazard Area (100-yr zone)
+    0.0 = no intersection found, or API unavailable
     """
-    no_flood = pd.Series(False, index=segments["segment_id"], dtype=bool)
+    no_flood = pd.Series(0.0, index=segments["segment_id"], dtype=float)
 
     flood_zones = _fetch_flood_zones()
     if flood_zones is None:
         return no_flood
 
-    segs_m = segments.to_crs(32616).copy()
+    segs_m = segments.to_crs(32616)[["segment_id", "geometry"]].copy()
 
     try:
         joined = gpd.sjoin(
-            segs_m[["segment_id", "geometry"]],
+            segs_m,
             flood_zones[["geometry"]],
             how="left",
             predicate="intersects",
         )
         in_flood = joined.groupby("segment_id")["index_right"].any()
-        result = in_flood.reindex(segments["segment_id"], fill_value=False)
+        result = in_flood.reindex(segments["segment_id"], fill_value=False).astype(float)
         logger.info("flooding.py: %d / %d segments intersect a flood zone", int(result.sum()), len(result))
         return result
 
     except Exception as exc:
-        logger.warning("flooding.py: intersection failed (%s); returning all False", exc)
+        logger.warning("flooding.py: intersection failed (%s); returning all 0.0", exc)
         return no_flood

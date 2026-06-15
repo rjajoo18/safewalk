@@ -6,8 +6,8 @@ Data sources:
      Clayton County (Forest Park / Lake City) which is outside Atlanta city limits.
      ATL311 will return zero results for this corridor — gap_reports is the
      primary hazard source here.
-  2. Supabase gap_reports table (live read when SUPABASE_URL + SUPABASE_KEY are set)
-     Falls back to empty GeoDataFrame when env vars are absent (offline-safe).
+  2. Supabase gap_reports table (live read when SUPABASE_URL + SUPABASE_ANON_KEY
+     are set). Falls back to empty GeoDataFrame when env vars are absent (offline-safe).
 
 Scoring: max(type_weight × (1 − dist_m/20m)) over hazards within 20 m
          Distance decay rewards proximity; max-not-sum prevents density bias
@@ -95,15 +95,15 @@ def _load_atl311() -> gpd.GeoDataFrame:
 def _load_gap_reports() -> gpd.GeoDataFrame:
     """Load gap_reports from Supabase.
 
-    Falls back to an empty GeoDataFrame when SUPABASE_URL / SUPABASE_KEY are
+    Falls back to an empty GeoDataFrame when SUPABASE_URL / SUPABASE_ANON_KEY are
     not set so the module stays fully offline-safe.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_KEY")
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY")
 
     if not supabase_url or not supabase_key:
         # Null policy: Supabase not configured → empty (offline-safe)
-        logger.debug("SUPABASE_URL/SUPABASE_KEY not set; skipping gap_reports")
+        logger.debug("SUPABASE_URL/SUPABASE_ANON_KEY not set; skipping gap_reports")
         return gpd.GeoDataFrame(
             {"geometry": gpd.GeoSeries([], crs=32616), "hazard_type": [], "weight": []},
             crs=32616,
@@ -161,7 +161,10 @@ def _load_gap_reports() -> gpd.GeoDataFrame:
 def score(segments: gpd.GeoDataFrame) -> pd.Series:
     """Return hazard_norm in [0, 1] indexed by segment_id.
 
-    Uses max-not-sum with distance decay to prevent density bias.
+    Per-segment score = max(type_weight × (1 − dist_m / 20)) over hazards within
+    20 m of the segment line, where dist_m is the true point-to-line distance
+    (EPSG:32616 metres). Max-not-sum with distance decay keeps it a point penalty,
+    never complaint density (Constitution Principle II / DESIGN.md Appendix B).
     """
     atl311 = _load_atl311()
     gap_reports = _load_gap_reports()
@@ -169,38 +172,31 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
     all_hazards = pd.concat([atl311, gap_reports], ignore_index=True)
     all_hazards = gpd.GeoDataFrame(all_hazards, geometry="geometry", crs=32616)
 
-    segs_m = segments.to_crs(32616).copy()
-
+    zeros = pd.Series(0.0, index=segments["segment_id"], dtype=float)
     if all_hazards.empty:
         # Null policy: no hazard data → all zeros
-        return pd.Series(0.0, index=segments["segment_id"], dtype=float)
+        return zeros
 
-    # Buffer segments to capture all hazard points within 20 m
-    buf_gdf = segs_m.copy().set_geometry(segs_m.geometry.buffer(_HAZARD_RADIUS_M))
-    buf_gdf = buf_gdf[["segment_id", "geometry"]]
+    segs_m = segments.to_crs(32616)[["segment_id", "geometry"]].copy()
 
-    joined = gpd.sjoin(buf_gdf, all_hazards[["geometry", "weight"]], how="left", predicate="contains")
-
-    if joined["index_right"].isna().all():
-        # Null policy: no hazard within radius → all zeros
-        return pd.Series(0.0, index=segments["segment_id"], dtype=float)
-
-    # Distance decay: score = type_weight × (1 − dist_m / 20m)
-    # Distances measured from segment centroid to each matched hazard point (EPSG:32616 metres)
-    seg_centroids = segs_m.set_index("segment_id").geometry.centroid
-    haz_geoms = all_hazards.geometry  # 0-based index from ignore_index=True concat
-
-    valid = joined.dropna(subset=["index_right"]).copy()
-    valid["_dist"] = [
-        seg_centroids[row["segment_id"]].distance(haz_geoms.iloc[int(row["index_right"])])
-        for _, row in valid.iterrows()
-    ]
-    valid["score"] = (
-        valid["weight"].fillna(0.0) * (1 - valid["_dist"] / _HAZARD_RADIUS_M).clip(lower=0)
+    # Nearest hazard within 20 m of each segment line (true point-to-line distance).
+    near = gpd.sjoin_nearest(
+        segs_m,
+        all_hazards[["geometry", "weight"]],
+        how="left",
+        max_distance=_HAZARD_RADIUS_M,
+        distance_col="_dist",
     )
 
-    # max-not-sum: highest decayed score per segment (prevents density bias)
-    agg = valid.groupby("segment_id")["score"].max().fillna(0.0)
+    matched = near.dropna(subset=["_dist"])
+    if matched.empty:
+        # Null policy: no hazard within radius → all zeros
+        return zeros
 
-    result = agg.reindex(segments["segment_id"], fill_value=0.0)
-    return result.clip(0.0, 1.0).rename(None)
+    # Distance decay: score = type_weight × (1 − dist_m / 20m)
+    decay = (1.0 - matched["_dist"] / _HAZARD_RADIUS_M).clip(lower=0.0)
+    matched = matched.assign(_score=matched["weight"].fillna(0.0) * decay)
+
+    # max-not-sum: strongest decayed hazard per segment (prevents density bias)
+    agg = matched.groupby("segment_id")["_score"].max()
+    return agg.reindex(segments["segment_id"], fill_value=0.0).clip(0.0, 1.0).rename(None)

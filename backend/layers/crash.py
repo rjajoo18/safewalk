@@ -52,11 +52,9 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
         predicate="contains",
     )
 
-    agg = joined.groupby("segment_id")["sev_weight"].sum().fillna(0.0)
+    agg = joined.groupby("segment_id")["sev_weight"].sum()
     result = agg.reindex(segments["segment_id"], fill_value=0.0)
 
-    if result.max() == 0.0:
-        # Null policy: no crashes in corridor → return all zeros
-        return pd.Series(0.0, index=segments["segment_id"], dtype=float)
-
-    return normalize(result).clip(0.0, 1.0)
+    # Null policy: no pedestrian crashes in corridor → normalize returns all
+    # zeros (min == max), which is the documented crash_norm = 0.0 default.
+    return normalize(result)
