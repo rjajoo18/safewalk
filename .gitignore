@@ -6,6 +6,10 @@ __pycache__/
 .venv/
 .env
 
+# Claude Code
+.claude/
+
 # Data artifacts
-backend/data/*.parquet
+backend/data/
 !backend/data/.gitkeep
+
