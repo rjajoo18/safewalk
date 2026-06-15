@@ -1,0 +1,5 @@
+geopandas>=0.14
+shapely>=2.0
+pyarrow>=14
+pandas>=2.0
+requests>=2.31
