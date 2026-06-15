@@ -20,9 +20,8 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
-# layers/ is at repo root — insert repo root into sys.path
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_REPO_ROOT))
+# layers/ is in backend/ — insert backend/ into sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from layers import canopy, crash, exposure, flooding, hazards, slope
 

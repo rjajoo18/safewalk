@@ -18,7 +18,7 @@ import pandas as pd
 
 from layers._utils import normalize, weight_by_kabco
 
-_DATA_FILE = Path(__file__).resolve().parent.parent / "backend" / "data" / "Crashes_2020-2024.geojson"
+_DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "Crashes_2020-2024.geojson"
 _BUFFER_M = 30.0
 _TARGET_COUNTIES = {"Clayton"}
 

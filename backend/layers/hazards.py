@@ -27,7 +27,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-_DATA_FILE = Path(__file__).resolve().parent.parent / "backend" / "data" / "ATL311_Service_Requests.geojson"
+_DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "ATL311_Service_Requests.geojson"
 _HAZARD_RADIUS_M = 20.0
 
 # ATL311 TaskType → hazard vocab mapping
@@ -161,7 +161,7 @@ def _load_gap_reports() -> gpd.GeoDataFrame:
 def score(segments: gpd.GeoDataFrame) -> pd.Series:
     """Return hazard_norm in [0, 1] indexed by segment_id.
 
-    Uses max-not-sum to prevent density bias.
+    Uses max-not-sum with distance decay to prevent density bias.
     """
     atl311 = _load_atl311()
     gap_reports = _load_gap_reports()
@@ -182,7 +182,7 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
     joined = gpd.sjoin(buf_gdf, all_hazards[["geometry", "weight"]], how="left", predicate="contains")
 
     if joined["index_right"].isna().all():
-        # Null policy: no hazard data within radius → all zeros
+        # Null policy: no hazard within radius → all zeros
         return pd.Series(0.0, index=segments["segment_id"], dtype=float)
 
     # Distance decay: score = type_weight × (1 − dist_m / 20m)

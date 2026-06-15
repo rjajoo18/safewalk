@@ -25,7 +25,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-_DEM_FILE = Path(__file__).resolve().parent.parent / "backend" / "data" / "dem.tif"
+_DEM_FILE = Path(__file__).resolve().parent.parent / "data" / "dem.tif"
 
 # ADA-referenced grade thresholds
 _GRADE_COMFORTABLE = 0.05    # 5% — no penalty
