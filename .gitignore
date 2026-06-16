@@ -1,6 +1,7 @@
 # Working docs (per-author scratch, not part of the deliverable)
 TASKS.md
 PROGRESS.md
+SCORING.md
 
 # Python
 __pycache__/
@@ -8,6 +9,7 @@ __pycache__/
 .venv/
 venv/
 .env
+frontend/.env.local
 
 # OS / tooling
 .DS_Store

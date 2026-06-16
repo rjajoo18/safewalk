@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
@@ -23,21 +24,109 @@ from app.models import (
     VerifyGapResponse,
 )
 from app.network import GraphRouter, serialize_segment
-from app.scoring import PROFILES, build_explanation, resolve_weights, score_route
+from app.scoring import (
+    build_explanation,
+    resolve_weights_from_sliders,
+    score_route,
+)
 from app.segment_repository import SegmentRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SIDEWALK_SERVICE_URL = (
+    "https://services2.arcgis.com/zLeajbicrDRLQcny/ArcGIS/rest/services/"
+    "Sidewalks_Inventory/FeatureServer/2/query"
+)
+MARTA_AREA_ENVELOPE = "-84.52,33.61,-84.20,33.97"
+SIDEWALK_PAGE_SIZE = 2000
+
+
+def sidewalk_quality(sidewalk_cov: float | None) -> str:
+    if sidewalk_cov is None:
+        return "partial"
+    if sidewalk_cov >= 0.75:
+        return "full"
+    if sidewalk_cov >= 0.25:
+        return "partial"
+    return "none"
+
+
+def sidewalk_inventory_quality(properties: dict) -> str:
+    rating = str(properties.get("SWCIRating", "")).lower()
+    sidewalk_type = str(properties.get("SidewalkType", "")).lower()
+    condition = str(properties.get("ObservedCondition", "")).lower()
+
+    if "no sidewalk" in rating or "no sw" in sidewalk_type or "no sw" in condition:
+        return "none"
+    if "excellent" in rating or "good" in rating:
+        return "full"
+    if "fair" in rating or "poor" in rating:
+        return "partial"
+    return "full"
+
+
+def fetch_arc_sidewalks() -> dict:
+    features = []
+
+    try:
+        with httpx.Client(timeout=12) as client:
+            for offset in range(0, 20000, SIDEWALK_PAGE_SIZE):
+                response = client.get(
+                    SIDEWALK_SERVICE_URL,
+                    params={
+                        "f": "geojson",
+                        "where": "1=1",
+                        "outFields": "OBJECTID,SW_ID,StreetName,SidewalkType,ObservedCondition,SWCIRating",
+                        "returnGeometry": "true",
+                        "outSR": "4326",
+                        "geometry": MARTA_AREA_ENVELOPE,
+                        "geometryType": "esriGeometryEnvelope",
+                        "inSR": "4326",
+                        "spatialRel": "esriSpatialRelIntersects",
+                        "resultRecordCount": str(SIDEWALK_PAGE_SIZE),
+                        "resultOffset": str(offset),
+                    },
+                )
+                response.raise_for_status()
+                page_features = response.json().get("features", [])
+
+                for feature in page_features:
+                    if feature.get("geometry", {}).get("type") != "LineString":
+                        continue
+                    properties = feature.get("properties") or {}
+                    properties["quality"] = sidewalk_inventory_quality(properties)
+                    if properties["quality"] == "none":
+                        continue
+                    feature["properties"] = properties
+                    features.append(feature)
+
+                if len(page_features) < SIDEWALK_PAGE_SIZE:
+                    break
+    except Exception:
+        logger.exception("ARC sidewalk fetch failed")
+        return {"type": "FeatureCollection", "features": []}
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+# =========================================================================
+# POST /score — Mapbox candidate scoring
+# =========================================================================
 
 def score_routes(request: ScoreRequest, http_request: Request) -> ScoreResponse:
     """Core scoring logic — runs in threadpool (sync handler)."""
     settings = http_request.app.state.settings
     segment_store = http_request.app.state.segment_store
 
-    weights = resolve_weights(request.weights, request.profile)
-    profile = request.profile or "day"
+    weights = resolve_weights_from_sliders(
+        sidewalks=request.sidewalks,
+        safety=request.safety,
+        comfort=request.comfort,
+        theme=request.theme,
+    )
+    step_free = request.step_free
 
     try:
         candidates = fetch_walking_routes(
@@ -51,10 +140,10 @@ def score_routes(request: ScoreRequest, http_request: Request) -> ScoreResponse:
 
     scored: list[RouteResult] = []
     for candidate in candidates:
-        segments = segment_store.snap_route(candidate.geometry, weights, profile)
-        route_score = score_route(segments, weights, profile)
+        segments = segment_store.snap_route(candidate.geometry, weights, step_free=step_free)
+        route_score = score_route(segments, weights, step_free=step_free)
         geojson = route_to_geojson(segments, route_score)
-        explanation = build_explanation(segments, weights, profile)
+        explanation = build_explanation(segments, weights, step_free=step_free)
 
         scored.append(
             RouteResult(
@@ -81,17 +170,45 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+@router.get("/api/sidewalks/")
+def get_sidewalks(http_request: Request) -> dict:
+    segment_store = http_request.app.state.segment_store
+    gdf = segment_store.gdf
+
+    if gdf.empty:
+        return fetch_arc_sidewalks()
+
+    sidewalks = gdf.to_crs(4326)
+    features = []
+    for _, row in sidewalks.iterrows():
+        geometry = row.geometry
+        if geometry.geom_type != "LineString":
+            continue
+        quality = sidewalk_quality(row.get("sidewalk_cov"))
+        if quality == "none":
+            continue
+
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "quality": quality,
+                },
+                "geometry": geometry.__geo_interface__,
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
+
+
 @router.post("/score", response_model=ScoreResponse)
 def post_score(request: ScoreRequest, http_request: Request) -> ScoreResponse:
     return score_routes(request, http_request)
 
 
-def _route_weights(profile: str, sidewalk_weight: float, traffic_weight: float) -> dict[str, float]:
-    base = dict(PROFILES.get(profile, PROFILES["day"]))
-    base["sidewalk"] = sidewalk_weight
-    base["traffic"] = traffic_weight
-    return resolve_weights(base, None)
-
+# =========================================================================
+# GET /route — Dijkstra walkable-graph routing
+# =========================================================================
 
 def _to_route_segments(segments: list[dict], include_risk: bool) -> list[RouteSegment]:
     output: list[RouteSegment] = []
@@ -108,15 +225,19 @@ def get_route(
     origin_lng: float = Query(..., ge=-180, le=180),
     dest_lat: float = Query(..., ge=-90, le=90),
     dest_lng: float = Query(..., ge=-180, le=180),
-    profile: str = Query("day", pattern="^(day|night|accessible)$"),
-    sidewalk_weight: float = Query(0.5, ge=0, le=1),
-    traffic_weight: float = Query(0.2, ge=0, le=1),
+    sidewalks: int | None = Query(default=None, ge=0, le=100),
+    safety:    int | None = Query(default=None, ge=0, le=100),
+    comfort:   int | None = Query(default=None, ge=0, le=100),
+    step_free: bool = Query(default=False),
+    theme: Literal["light", "dark"] = Query(default="light"),
 ) -> RouteResponse:
     graph: GraphRouter = http_request.app.state.graph_router
     if graph.walkable_gdf.empty:
         raise HTTPException(status_code=503, detail="Walkable network is not loaded")
 
-    weights = _route_weights(profile, sidewalk_weight, traffic_weight)
+    weights = resolve_weights_from_sliders(
+        sidewalks=sidewalks, safety=safety, comfort=comfort, theme=theme,
+    )
 
     try:
         safe_segments, fast_segments, mean_risk, safe_distance, fast_distance, _ = graph.route(
@@ -125,12 +246,12 @@ def get_route(
             dest_lon=dest_lng,
             dest_lat=dest_lat,
             weights=weights,
-            profile=profile,
+            step_free=step_free,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    explanation = build_explanation(safe_segments, weights, profile)
+    explanation = build_explanation(safe_segments, weights, step_free=step_free)
 
     return RouteResponse(
         safe_route=SafeRouteResult(
