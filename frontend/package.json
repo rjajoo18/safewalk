@@ -5,6 +5,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@maplibre/maplibre-gl-directions": "^0.9.1",
     "framer-motion": "^12.40.0",
     "lucide-react": "^0.468.0",
     "maplibre-gl": "^5.24.0",

@@ -6,14 +6,14 @@ import logging
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import LineString
 
 from app.scoring import crossing_penalty, segment_risk
 
 logger = logging.getLogger(__name__)
 
-SEGMENT_COLUMNS = [
-    "segment_id",
+FACTOR_COLUMNS = [
     "sidewalk_cov",
     "traffic_risk",
     "crash_norm",
@@ -21,11 +21,57 @@ SEGMENT_COLUMNS = [
     "canopy_pct",
     "exposure_norm",
     "slope_risk",
+]
+
+METADATA_COLUMNS = [
+    "segment_id",
     "barrier",
     "crossing_penalty",
     "highway",
     "wheelchair",
+    "foot",
+    "access",
+    "length_m",
 ]
+
+SEGMENT_COLUMNS = ["segment_id", *FACTOR_COLUMNS, *METADATA_COLUMNS[1:]]
+
+
+def _hydrate_factor_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Fill missing scoring columns when loading network-only parquet (R3 sample)."""
+    out = gdf.copy()
+
+    defaults: dict[str, object] = {
+        "sidewalk_cov": 0.0,
+        "traffic_risk": 0.0,
+        "crash_norm": 0.0,
+        "hazard_norm": 0.0,
+        "canopy_pct": 0.0,
+        "exposure_norm": 0.0,
+        "slope_risk": 0.0,
+        "crossing_penalty": 0.0,
+        "barrier": False,
+    }
+    for col, default in defaults.items():
+        if col not in out.columns:
+            out[col] = default
+        else:
+            out[col] = out[col].fillna(default)
+
+    if "length_m" not in out.columns:
+        out["length_m"] = out.to_crs(32616).geometry.length
+
+    if "segment_id" in out.columns:
+        out = out.set_index("segment_id", drop=False)
+
+    missing = [c for c in FACTOR_COLUMNS if c not in gdf.columns]
+    if missing:
+        logger.warning(
+            "Parquet missing factor columns %s — using defaults until prebake/overlay runs",
+            missing,
+        )
+
+    return out
 
 
 class SegmentStore:
@@ -43,8 +89,7 @@ class SegmentStore:
         if not path.exists():
             raise FileNotFoundError(f"Scored segments not found: {path}")
         gdf = gpd.read_parquet(path)
-        if "segment_id" in gdf.columns:
-            gdf = gdf.set_index("segment_id", drop=False)
+        gdf = _hydrate_factor_columns(gdf)
         logger.info("Loaded %d scored segments from %s", len(gdf), path)
         return cls(gdf)
 
@@ -119,6 +164,9 @@ def create_empty_store() -> SegmentStore:
             "crossing_penalty": pd.Series(dtype=float),
             "highway": pd.Series(dtype=str),
             "wheelchair": pd.Series(dtype=str),
+            "foot": pd.Series(dtype=str),
+            "access": pd.Series(dtype=str),
+            "length_m": pd.Series(dtype=float),
         },
         geometry=gpd.GeoSeries([], crs=4326),
         crs=4326,
