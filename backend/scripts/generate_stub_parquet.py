@@ -36,20 +36,22 @@ def _grid_segments(bbox: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
     segments: list[LineString] = []
     ids: list[str] = []
 
-    lat = min_lat
-    row = 0
-    while lat < max_lat:
-        lon = min_lon
-        col = 0
-        while lon < max_lon:
-            end_lon = min(lon + SEGMENT_LENGTH_DEG, max_lon)
-            end_lat = min(lat + SEGMENT_LENGTH_DEG * 0.4, max_lat)
-            segments.append(LineString([(lon, lat), (end_lon, end_lat)]))
-            ids.append(f"stub-{row:04d}-{col:04d}")
-            lon += SEGMENT_LENGTH_DEG
-            col += 1
-        lat += SEGMENT_LENGTH_DEG * 0.4
-        row += 1
+    lons = list(np.arange(min_lon, max_lon, SEGMENT_LENGTH_DEG))
+    lats = list(np.arange(min_lat, max_lat, SEGMENT_LENGTH_DEG * 0.4))
+    if len(lons) < 2:
+        lons = [min_lon, max_lon]
+    if len(lats) < 2:
+        lats = [min_lat, max_lat]
+
+    for i, lat in enumerate(lats):
+        for j in range(len(lons) - 1):
+            segments.append(LineString([(lons[j], lat), (lons[j + 1], lat)]))
+            ids.append(f"h-{i:04d}-{j:04d}")
+
+    for j, lon in enumerate(lons):
+        for i in range(len(lats) - 1):
+            segments.append(LineString([(lon, lats[i]), (lon, lats[i + 1])]))
+            ids.append(f"v-{i:04d}-{j:04d}")
 
     n = len(segments)
     rng = np.random.default_rng(42)
@@ -73,12 +75,18 @@ def _grid_segments(bbox: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
             "barrier": rng.choice([False, True], n, p=[0.95, 0.05]),
             "crossing_penalty": crossing_penalty.astype(float),
             "lanes": rng.choice([2.0, 4.0, 6.0], n),
-            "highway": rng.choice(["residential", "tertiary", "footway"], n),
+            "highway": rng.choice(
+                ["residential", "tertiary", "footway", "living_street", "service"],
+                n,
+            ),
+            "foot": [None] * n,
+            "access": [None] * n,
             "wheelchair": rng.choice([None, "yes", "no"], n, p=[0.9, 0.08, 0.02]),
         },
         geometry=segments,
         crs="EPSG:4326",
     )
+    gdf["length_m"] = gdf.to_crs(32616).geometry.length
     return gdf.set_index("segment_id", drop=False)
 
 

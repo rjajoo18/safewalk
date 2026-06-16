@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-ProfileName = Literal["day", "night", "accessible"]
+Theme = Literal["light", "dark"]
 
 
 class ScoreRequest(BaseModel):
@@ -17,13 +17,25 @@ class ScoreRequest(BaseModel):
         description="Destination [lon, lat]",
         examples=[[-84.329, 33.620]],
     )
-    weights: dict[str, float] | None = Field(
-        default=None,
-        description="Optional factor weights; normalized to sum 1. Overrides profile.",
+    sidewalks: int | None = Field(
+        default=None, ge=0, le=100,
+        description="Sidewalk-presence weight (0–100). Theme default used if omitted.",
     )
-    profile: ProfileName | None = Field(
-        default="day",
-        description="Preset weight profile when weights are omitted",
+    safety: int | None = Field(
+        default=None, ge=0, le=100,
+        description="Safety blend weight (traffic + crash + hazards + flooding).",
+    )
+    comfort: int | None = Field(
+        default=None, ge=0, le=100,
+        description="Comfort blend weight (shade + heat + slope).",
+    )
+    step_free: bool = Field(
+        default=False,
+        description="Hard-avoid stairs / wheelchair=no / steep grades.",
+    )
+    theme: Theme = Field(
+        default="light",
+        description="Light = day defaults, dark = night defaults. Used as fallback for omitted sliders.",
     )
 
 
@@ -41,3 +53,47 @@ class ScoreResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class RouteSegment(BaseModel):
+    segment_id: str
+    sidewalk_cov: float
+    traffic_risk: float
+    crash_norm: float
+    hazard_norm: float
+    canopy_pct: float
+    exposure_norm: float
+    slope_risk: float
+    length_m: float
+    geometry: dict | None = None
+    risk: float | None = None
+
+
+class SafeRouteResult(BaseModel):
+    segments: list[RouteSegment]
+    total_risk: float
+    distance_m: float
+    explanation: str
+
+
+class FastRouteResult(BaseModel):
+    segments: list[RouteSegment]
+    distance_m: float
+
+
+class RouteResponse(BaseModel):
+    safe_route: SafeRouteResult
+    fast_route: FastRouteResult
+
+
+class SegmentDetailResponse(BaseModel):
+    segment_id: str
+    sidewalk_cov: float
+    traffic_risk: float
+    crash_norm: float
+    hazard_norm: float
+    canopy_pct: float
+    exposure_norm: float
+    slope_risk: float
+    composite_score: float
+    geometry: dict | None = None
