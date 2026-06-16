@@ -152,12 +152,12 @@ class GraphRouter:
                 edge.safe_cost = 1.0
                 edge.fast_cost = float(seg.get("length_m") or 1.0)
 
-    def set_safe_costs(self, weights: dict[str, float], profile: str) -> None:
+    def set_safe_costs(self, weights: dict[str, float], step_free: bool = False) -> None:
         for node_edges in self.adjacency.values():
             for edge in node_edges:
                 seg = self.segment_lookup[edge.segment_id]
-                cp = crossing_penalty(seg, profile)
-                risk = segment_risk(seg, weights, profile, crossing_penalty=cp)
+                cp = crossing_penalty(seg, step_free)
+                risk = segment_risk(seg, weights, step_free, crossing_penalty_value=cp)
                 edge.safe_cost = risk if risk != float("inf") else 1e12
 
     def snap_to_node(self, lon: float, lat: float) -> tuple[float, float]:
@@ -229,7 +229,7 @@ class GraphRouter:
         dest_lon: float,
         dest_lat: float,
         weights: dict[str, float],
-        profile: str,
+        step_free: bool = False,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float, float, float, float]:
         start = self.snap_to_node(origin_lon, origin_lat)
         goal = self.snap_to_node(dest_lon, dest_lat)
@@ -238,14 +238,14 @@ class GraphRouter:
         fast_segments = [self.segment_lookup[sid] for sid in fast_ids]
         fast_distance = sum(float(s.get("length_m") or 0.0) for s in fast_segments)
 
-        self.set_safe_costs(weights, profile)
+        self.set_safe_costs(weights, step_free)
         safe_ids, total_risk = self.dijkstra(start, goal, "safe_cost")
         safe_segments: list[dict[str, Any]] = []
         risks: list[float] = []
         for sid in safe_ids:
             seg = self.segment_lookup[sid].copy()
-            cp = crossing_penalty(seg, profile)
-            risk = segment_risk(seg, weights, profile, crossing_penalty=cp)
+            cp = crossing_penalty(seg, step_free)
+            risk = segment_risk(seg, weights, step_free, crossing_penalty_value=cp)
             seg["risk"] = risk
             safe_segments.append(seg)
             risks.append(risk)
