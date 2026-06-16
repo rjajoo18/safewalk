@@ -24,7 +24,7 @@ import {
   NoRouteError,
   osrmRouteStats,
   segmentsToFeatures,
-  verifyGapReport,
+  submitGapReport as submitGapReportToBackend,
   type RouteStats
 } from "./lib/backendApi";
 import { fetchGapReports, gapTypeMeta, subscribeGapReports, type GapReport } from "./lib/gapReports";
@@ -729,7 +729,7 @@ function ReportPanel({
   message: string;
   onSubmit: () => void;
 }) {
-  const canSubmit = Boolean(pendingPin) && hasPhoto && status !== "verifying";
+  const canSubmit = Boolean(pendingPin) && status !== "verifying";
 
   return (
     <div className="panel report-panel">
@@ -738,7 +738,7 @@ function ReportPanel({
         {pendingPin ? "✓" : "(tap to drop a pin)"}
       </p>
       <p className="report-step">
-        <b>2.</b> Add a photo of the gap — AI verifies it
+        <b>2.</b> Add a photo of the gap (optional)
       </p>
       <input
         className="report-photo-input"
@@ -756,7 +756,9 @@ function ReportPanel({
         onChange={(event) => setNote(event.target.value)}
       />
       <button className="primary-btn" onClick={onSubmit} disabled={!canSubmit}>
-        {status === "verifying" ? "Verifying photo…" : "Submit report"} <ArrowRight size={18} />
+        {status === "verifying"
+          ? hasPhoto ? "Verifying photo..." : "Submitting report..."
+          : "Submit report"} <ArrowRight size={18} />
       </button>
       {message && (
         <p
@@ -767,7 +769,7 @@ function ReportPanel({
           {message}
         </p>
       )}
-      <small>Anonymous · geotagged · AI-verified · live on the map</small>
+      <small>Anonymous · geotagged · live on the map</small>
     </div>
   );
 }
@@ -829,11 +831,11 @@ function MapPanel({
   }, []);
 
   const submitReport = useCallback(async () => {
-    if (!pendingPin || !photoFile) return;
+    if (!pendingPin) return;
     setReportStatus("verifying");
-    setReportMessage("Claude is analyzing your photo…");
+    setReportMessage(photoFile ? "Claude is analyzing your photo..." : "Submitting your report...");
     try {
-      const result = await verifyGapReport({
+      const result = await submitGapReportToBackend({
         photo: photoFile,
         coordinates: pendingPin,
         note: note.trim() || undefined
@@ -841,7 +843,11 @@ function MapPanel({
       if (result.verified && result.report) {
         onNewReport(result.report);
         setReportStatus("verified");
-        setReportMessage(`AI confirmed: ${gapTypeMeta(result.report.type).label}. Pin is live on the map.`);
+        setReportMessage(
+          photoFile
+            ? `AI confirmed: ${gapTypeMeta(result.report.type).label}. Pin is live on the map.`
+            : "Report submitted. Pin is live on the map."
+        );
         window.setTimeout(resetReport, 2200);
       } else {
         setReportStatus("rejected");
