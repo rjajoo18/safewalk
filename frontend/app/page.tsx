@@ -284,10 +284,9 @@ function PreferencePanel({
   onStepFreeChange: (value: boolean) => void;
 }) {
   const controls: [PreferenceKey, string][] = [
-    ["sidewalk", "Sidewalk presence"],
-    ["traffic", "Low traffic"],
-    ["accessibility", "Accessibility"],
-    ["shade", "Shade"]
+    ["sidewalks", "Sidewalks"],
+    ["safety", "Safety"],
+    ["comfort", "Comfort"],
   ];
 
   return (
