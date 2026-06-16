@@ -182,6 +182,28 @@ def _insert_report(
     return rows[0] if rows else {}
 
 
+def list_gap_reports() -> list[dict]:
+    """Return all gap reports for the map (newest first).
+
+    Lets the frontend load existing pins through the backend instead of querying
+    Supabase directly. Rows without coordinates (shouldn't happen post-migration)
+    are dropped so the map never receives an unplottable pin.
+    """
+    sb = _supabase_client()
+    rows = (
+        sb.table("gap_reports")
+        .select("id,type,note,photo_url,lng,lat,status,reported_at")
+        .order("reported_at", desc=True)
+        .execute()
+        .data
+    )
+    return [
+        row
+        for row in (rows or [])
+        if row.get("lng") is not None and row.get("lat") is not None
+    ]
+
+
 def verify_and_record_gap(
     image_bytes: bytes,
     media_type: str,

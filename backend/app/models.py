@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ProfileName = Literal["day", "night", "accessible"]
@@ -75,6 +75,9 @@ class RouteResponse(BaseModel):
 
 
 class GapReport(BaseModel):
+    # The live table's id may be an integer; coerce to string so the API is stable.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     id: str
     type: str
     note: str | None = None

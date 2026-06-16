@@ -8,9 +8,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from starlette.concurrency import run_in_threadpool
 
 from app.directions import fetch_walking_routes, route_to_geojson
-from app.gap_reports import GapReportError, verify_and_record_gap
+from app.gap_reports import GapReportError, list_gap_reports, verify_and_record_gap
 from app.models import (
     FastRouteResult,
+    GapReport,
     HealthResponse,
     RouteResponse,
     RouteResult,
@@ -143,6 +144,20 @@ def get_route(
             distance_m=round(fast_distance, 2),
         ),
     )
+
+
+@router.get("/gap-reports", response_model=list[GapReport])
+async def get_gap_reports() -> list[GapReport]:
+    """List all crowdsourced gap reports (the pins shown on the map)."""
+    try:
+        rows = await run_in_threadpool(list_gap_reports)
+    except GapReportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface upstream failures as 502
+        logger.exception("gap-reports list failed")
+        raise HTTPException(status_code=502, detail=f"gap_reports read error: {exc}") from exc
+
+    return [GapReport(**row) for row in rows]
 
 
 @router.post("/verify-gap", response_model=VerifyGapResponse)

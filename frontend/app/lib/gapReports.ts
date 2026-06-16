@@ -25,8 +25,25 @@ export function gapTypeMeta(type: string) {
   return GAP_TYPE_META[type] ?? GAP_TYPE_META.other;
 }
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_SAFEWALK_API_URL;
+
 // Fetch all existing reports (the pins already on the map for known problems).
+// Prefers the backend /gap-reports endpoint so the browser isn't reading the DB
+// directly; falls back to a direct Supabase read only if the backend isn't set.
 export async function fetchGapReports(): Promise<GapReport[]> {
+  if (API_BASE_URL) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/gap-reports`);
+      if (res.ok) {
+        const rows = (await res.json()) as GapReport[];
+        return rows.filter((r) => r.lng != null && r.lat != null);
+      }
+      console.warn("fetchGapReports: backend returned", res.status);
+    } catch (err) {
+      console.warn("fetchGapReports: backend unreachable", err);
+    }
+  }
+
   const supabase = getSupabase();
   if (!supabase) return [];
 
@@ -54,8 +71,10 @@ export function subscribeGapReports(onInsert: (report: GapReport) => void): () =
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "gap_reports" },
       (payload) => {
-        const row = payload.new as GapReport;
-        if (row?.lng != null && row?.lat != null) onInsert(row);
+        const raw = payload.new as Partial<GapReport> & { id: string | number };
+        if (raw?.lng == null || raw?.lat == null) return;
+        // Normalize id to a string so it dedupes against backend-fetched rows.
+        onInsert({ ...(raw as GapReport), id: String(raw.id) });
       }
     )
     .subscribe();
