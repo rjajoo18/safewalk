@@ -9,10 +9,16 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from starlette.concurrency import run_in_threadpool
 
 from app.directions import fetch_walking_routes, route_to_geojson
-from app.gap_reports import GapReportError, list_gap_reports, verify_and_record_gap
+from app.gap_reports import (
+    GapReportError,
+    list_gap_reports,
+    update_gap_report_status,
+    verify_and_record_gap,
+)
 from app.models import (
     FastRouteResult,
     GapReport,
+    GapStatusUpdate,
     HealthResponse,
     RouteResponse,
     RouteResult,
@@ -279,6 +285,22 @@ async def get_gap_reports() -> list[GapReport]:
         raise HTTPException(status_code=502, detail=f"gap_reports read error: {exc}") from exc
 
     return [GapReport(**row) for row in rows]
+
+
+@router.patch("/gap-reports/{report_id}", response_model=GapReport)
+async def patch_gap_report(report_id: str, update: GapStatusUpdate) -> GapReport:
+    """Update a report's workflow status (reported -> in_progress -> processed)."""
+    try:
+        row = await run_in_threadpool(update_gap_report_status, report_id, update.status)
+    except GapReportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("gap-report status update failed")
+        raise HTTPException(status_code=502, detail=f"gap_reports update error: {exc}") from exc
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Gap report not found: {report_id}")
+    return GapReport(**row)
 
 
 @router.post("/verify-gap", response_model=VerifyGapResponse)

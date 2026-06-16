@@ -11,7 +11,7 @@ pyarrow>=18.0.0
 python-dotenv>=1.0.0
 # R4 data pipeline dependencies
 rasterio>=1.3.0
-rioxarray>=2024.1.0
+rioxarray>=0.15.0
 supabase>=2.0.0
 # Live gap-report photo verification (Claude vision)
 anthropic>=0.40.0

@@ -173,7 +173,7 @@ def _insert_report(
                 "type": gap_type,
                 "note": note,
                 "photo_url": photo_url,
-                "status": "open",
+                "status": "reported",
             }
         )
         .execute()
@@ -202,6 +202,23 @@ def list_gap_reports() -> list[dict]:
         for row in (rows or [])
         if row.get("lng") is not None and row.get("lat") is not None
     ]
+
+
+# Status workflow values — keep in sync with migration 0002's CHECK constraint.
+GAP_STATUSES = ("reported", "in_progress", "processed")
+
+
+def update_gap_report_status(report_id: str, status: str) -> dict:
+    """Update one report's status; returns the updated row (empty dict if not found)."""
+    sb = _supabase_client()
+    rows = (
+        sb.table("gap_reports")
+        .update({"status": status})
+        .eq("id", report_id)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else {}
 
 
 def verify_and_record_gap(

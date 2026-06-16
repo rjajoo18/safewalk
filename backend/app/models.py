@@ -108,6 +108,13 @@ class VerifyGapResponse(BaseModel):
     ai_type: str | None = None
 
 
+GapStatus = Literal["reported", "in_progress", "processed"]
+
+
+class GapStatusUpdate(BaseModel):
+    status: GapStatus
+
+
 class SegmentDetailResponse(BaseModel):
     segment_id: str
     sidewalk_cov: float
