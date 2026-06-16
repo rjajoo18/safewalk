@@ -3,21 +3,24 @@
 import {
   AlertTriangle,
   ArrowRight,
+  ArrowUp,
   Check,
   Clock3,
+  CornerUpLeft,
+  CornerUpRight,
   Flag,
   Footprints,
   MapPin,
   Shield,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapboxAutocomplete from "./components/MapboxAutocomplete";
 import type { RouteChoice, RouteStatus } from "./components/RealMap";
 import { scoreRoute, submitGapReport } from "./lib/backendApi";
 import { routeData, scoreData } from "./lib/data";
 
-type PreferenceKey = "sidewalk" | "traffic" | "accessibility";
+type PreferenceKey = "sidewalk" | "traffic" | "accessibility" | "shade";
 const DOTS = 5;
 
 const RealMap = dynamic(() => import("./components/RealMap"), { ssr: false });
@@ -30,8 +33,81 @@ const reportTypes = [
   "Construction"
 ];
 
+const martaStations = [
+  ["Airport Station", [-84.446, 33.6407]],
+  ["Arts Center Station", [-84.3867, 33.7893]],
+  ["Ashby Station", [-84.4173, 33.7563]],
+  ["Avondale Station", [-84.2807, 33.7753]],
+  ["Bankhead Station", [-84.4289, 33.7716]],
+  ["Brookhaven/Oglethorpe Station", [-84.3396, 33.8597]],
+  ["Buckhead Station", [-84.3671, 33.8482]],
+  ["Chamblee Station", [-84.3053, 33.8874]],
+  ["Civic Center Station", [-84.3873, 33.7663]],
+  ["College Park Station", [-84.4487, 33.6516]],
+  ["Decatur Station", [-84.2966, 33.7748]],
+  ["Doraville Station", [-84.2801, 33.9029]],
+  ["Dunwoody Station", [-84.3447, 33.9213]],
+  ["East Lake Station", [-84.3065, 33.7651]],
+  ["East Point Station", [-84.4418, 33.6767]],
+  ["Edgewood/Candler Park Station", [-84.34, 33.7619]],
+  ["Five Points Station", [-84.3915, 33.7539]],
+  ["Garnett Station", [-84.3961, 33.7489]],
+  ["Georgia State Station", [-84.3857, 33.7499]],
+  ["GWCC/CNN Center Station", [-84.3977, 33.7574]],
+  ["Hamilton E. Holmes Station", [-84.4698, 33.7546]],
+  ["Indian Creek Station", [-84.2292, 33.7699]],
+  ["Inman Park/Reynoldstown Station", [-84.3527, 33.7574]],
+  ["Kensington Station", [-84.2514, 33.7725]],
+  ["King Memorial Station", [-84.3758, 33.7493]],
+  ["Lakewood/Fort McPherson Station", [-84.4289, 33.7005]],
+  ["Lenox Station", [-84.3579, 33.8464]],
+  ["Lindbergh Center Station", [-84.3673, 33.8236]],
+  ["Medical Center Station", [-84.3514, 33.9105]],
+  ["Midtown Station", [-84.3867, 33.7806]],
+  ["North Avenue Station", [-84.3875, 33.7717]],
+  ["North Springs Station", [-84.3579, 33.9457]],
+  ["Oakland City Station", [-84.4255, 33.7173]],
+  ["Peachtree Center Station", [-84.3872, 33.7597]],
+  ["Sandy Springs Station", [-84.3515, 33.9321]],
+  ["Vine City Station", [-84.4038, 33.7566]],
+  ["West End Station", [-84.4172, 33.7358]],
+  ["West Lake Station", [-84.4461, 33.7532]]
+]
+  .map(([name, coords]) => ({ name: name as string, coords: coords as [number, number] }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+async function geocodeDestination(query: string): Promise<[number, number] | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+  if (token) {
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        trimmed
+      )}.json?access_token=${token}&limit=1&types=address,poi&proximity=-84.3880,33.7490`
+    );
+    const data = (await response.json()) as { features?: Array<{ center: [number, number] }> };
+    return data.features?.[0]?.center ?? null;
+  }
+
+  const queries = [trimmed, `${trimmed}, Atlanta, GA`, `${trimmed}, Georgia`];
+
+  for (const search of queries) {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(search)}&format=json&limit=1&countrycodes=us`
+    );
+    const data = (await response.json()) as Array<{ lon: string; lat: string }>;
+    if (data.length) return [Number(data[0].lon), Number(data[0].lat)];
+  }
+
+  return null;
+}
+
 export default function Home() {
   const [tab, setTab] = useState<"routes" | "score">("routes");
+  const [start, setStart] = useState("");
+  const [startCoords, setStartCoords] = useState<[number, number] | null>(null);
   const [destination, setDestination] = useState("");
   const [destinationCoords, setDestinationCoords] = useState<[number, number] | null>(null);
   const [routeRequest, setRouteRequest] = useState(0);
@@ -39,13 +115,19 @@ export default function Home() {
   const [selectedRoute, setSelectedRoute] = useState<RouteChoice>("safe");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const requestRoute = useCallback(async () => {
-    if (!destination.trim()) return;
+    if (!start.trim() || !destination.trim()) return;
     setRouteStatus("loading");
 
     try {
+      const origin = startCoords ?? await geocodeDestination(start);
+      const dest = destinationCoords ?? await geocodeDestination(destination);
+      if (!origin || !dest) throw new Error("Address not found");
+      setStartCoords(origin);
+      setDestinationCoords(dest);
+
       await scoreRoute({
-        origin: [-84.4194, 33.689],
-        dest: destinationCoords ?? [-84.4058, 33.7042],
+        origin,
+        dest,
         profile: "day"
       });
       setRouteStatus("done");
@@ -54,7 +136,7 @@ export default function Home() {
     }
 
     setRouteRequest((request) => request + 1);
-  }, [destination, destinationCoords]);
+  }, [destination, destinationCoords, start, startCoords]);
 
   const co2 = useMemo(
     () => Math.round(routeData.safe_route.distance_mi * 1.1 * 10) / 10,
@@ -70,13 +152,23 @@ export default function Home() {
             <div className="search-box">
               <label className="field">
                 <MapPin size={20} />
-                <input value="Gillem MARTA Station" readOnly />
+                <MapboxAutocomplete
+                  value={start}
+                  onChange={(value) => {
+                    setStart(value);
+                    setStartCoords(null);
+                  }}
+                  onSelect={(coords, placeName) => {
+                    setStartCoords(coords);
+                    setStart(placeName);
+                  }}
+                  placeholder="Starting point..."
+                />
               </label>
               <label className="field muted">
                 <Flag size={20} />
-                <MapboxAutocomplete
+                <MartaStationDropdown
                   value={destination}
-                  onChange={setDestination}
                   onSelect={(coords, placeName) => {
                     setDestinationCoords(coords);
                     setDestination(placeName);
@@ -113,7 +205,12 @@ export default function Home() {
             </div>
 
             {tab === "routes" && (
-              <RoutesPanel co2={co2} selectedRoute={selectedRoute} onSelectRoute={setSelectedRoute} />
+              <RoutesPanel
+                co2={co2}
+                pathKey={`${selectedRoute}-${routeRequest}`}
+                selectedRoute={selectedRoute}
+                onSelectRoute={setSelectedRoute}
+              />
             )}
             {tab === "score" && <ScorePanel />}
           </div>
@@ -121,8 +218,10 @@ export default function Home() {
 
         <MapPanel
           destination={destination}
+          startCoords={startCoords}
           destinationCoords={destinationCoords}
           routeRequest={routeRequest}
+          routeStatus={routeStatus}
           selectedRoute={selectedRoute}
           theme={theme}
           onRouteStatus={setRouteStatus}
@@ -136,13 +235,15 @@ function PreferencePanel() {
   const [preferences, setPreferences] = useState<Record<PreferenceKey, number>>({
     sidewalk: 3,
     traffic: 2,
-    accessibility: 2
+    accessibility: 2,
+    shade: 2
   });
 
   const controls: [PreferenceKey, string][] = [
     ["sidewalk", "Sidewalk presence"],
     ["traffic", "Traffic exposure"],
-    ["accessibility", "Accessibility"]
+    ["accessibility", "Accessibility"],
+    ["shade", "Shade"]
   ];
 
   return (
@@ -242,6 +343,54 @@ function SnapSlider({
   );
 }
 
+function MartaStationDropdown({
+  value,
+  onSelect
+}: {
+  value: string;
+  onSelect: (coords: [number, number], placeName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, []);
+
+  return (
+    <div className="marta-dropdown" ref={containerRef}>
+      <button
+        className={`marta-dropdown-trigger ${value ? "" : "placeholder"}`}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        {value || "Choose MARTA station..."}
+      </button>
+      {open && (
+        <div className="marta-dropdown-menu">
+          {martaStations.map((station) => (
+            <button
+              key={station.name}
+              type="button"
+              onClick={() => {
+                onSelect(station.coords, station.name);
+                setOpen(false);
+              }}
+            >
+              {station.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Nav({
   theme,
   onToggleTheme
@@ -290,13 +439,29 @@ function Nav({
 
 function RoutesPanel({
   co2,
+  pathKey,
   selectedRoute,
   onSelectRoute
 }: {
   co2: number;
+  pathKey: string;
   selectedRoute: RouteChoice;
   onSelectRoute: (route: RouteChoice) => void;
 }) {
+  const [walkedPathKey, setWalkedPathKey] = useState<string | null>(null);
+  const [confettiBurst, setConfettiBurst] = useState(0);
+  const walkedThisPath = walkedPathKey === pathKey;
+
+  useEffect(() => {
+    setConfettiBurst(0);
+  }, [pathKey]);
+
+  const countWalk = () => {
+    if (walkedThisPath) return;
+    setWalkedPathKey(pathKey);
+    setConfettiBurst((burst) => burst + 1);
+  };
+
   return (
     <div className="panel route-panel">
       <p className="eyebrow">Route comparison</p>
@@ -354,9 +519,31 @@ function RoutesPanel({
             </div>
           </div>
         </div>
-        <button className="walk-route-btn" type="button">
-          I walked this route
-        </button>
+        <div className="walk-route-action">
+          {confettiBurst > 0 && walkedThisPath && (
+            <div className="confetti-burst" key={confettiBurst} aria-hidden="true">
+              {Array.from({ length: 18 }).map((_, index) => (
+                <span
+                  key={index}
+                  style={{
+                    "--x": `${Math.cos((index / 18) * Math.PI * 2) * (26 + (index % 3) * 12)}px`,
+                    "--y": `${Math.sin((index / 18) * Math.PI * 2) * (22 + (index % 4) * 10) - 34}px`,
+                    "--r": `${index * 23}deg`,
+                    "--c": ["#2d7a5e", "#e8c547", "#e76f2e", "#38b98c"][index % 4]
+                  } as React.CSSProperties}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            className={`walk-route-btn ${walkedThisPath ? "is-counted" : ""}`}
+            type="button"
+            onClick={countWalk}
+            disabled={walkedThisPath}
+          >
+            {walkedThisPath ? "Walk counted" : "I walked this route"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -365,7 +552,7 @@ function RoutesPanel({
 function ScorePanel() {
   const rows = [
     ["Sidewalk", scoreData.sidewalk],
-    ["Traffic speed", scoreData.traffic_speed],
+    ["Traffic risk", scoreData.traffic_speed],
     ["Crash history", scoreData.crash_history],
     ["Accessible", scoreData.accessible]
   ] as const;
@@ -390,14 +577,22 @@ function ScorePanel() {
 function ReportPanel({
   selected,
   setSelected,
-  ticket,
+  submitted,
   submit
 }: {
   selected: string[];
   setSelected: (items: string[]) => void;
-  ticket: string;
+  submitted: boolean;
   submit: () => void;
 }) {
+  if (submitted) {
+    return (
+      <div className="panel report-panel report-panel-success">
+        <p>Report was submitted.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="panel report-panel">
       <p>Tap a segment on the map, then choose what is wrong:</p>
@@ -419,7 +614,7 @@ function ReportPanel({
         ))}
       </div>
       <button className="primary-btn" onClick={submit}>
-        {ticket || "Submit to Atlanta 311"} <ArrowRight size={18} />
+        Submit to Atlanta 311 <ArrowRight size={18} />
       </button>
       <small>Anonymous · geotagged · timestamped</small>
     </div>
@@ -428,36 +623,59 @@ function ReportPanel({
 
 function MapPanel({
   destination,
+  startCoords,
   destinationCoords,
   routeRequest,
+  routeStatus,
   selectedRoute,
   theme,
   onRouteStatus
 }: {
   destination: string;
+  startCoords: [number, number] | null;
   destinationCoords: [number, number] | null;
   routeRequest: number;
+  routeStatus: RouteStatus;
   selectedRoute: RouteChoice;
   theme: "light" | "dark";
   onRouteStatus: (status: RouteStatus) => void;
 }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
-  const [ticket, setTicket] = useState("");
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+  const routeSteps = selectedRoute === "safe"
+    ? [
+        { icon: "straight", text: "Head out from your starting point.", distance: "200 feet" },
+        { icon: "right", text: "Turn right onto the green sidewalk route.", distance: "0.2 miles" },
+        { icon: "straight", text: "Continue toward Jonesboro Road.", distance: "0.3 miles" },
+        { icon: "left", text: "Turn left at the safer marked crossing.", distance: "250 feet" },
+        { icon: "pin", text: `Arrive at ${destination || "your destination"}.`, distance: "Destination" }
+      ]
+    : [
+        { icon: "straight", text: "Head out from your starting point.", distance: "200 feet" },
+        { icon: "right", text: "Turn right onto the direct route.", distance: "0.2 miles" },
+        { icon: "straight", text: "Continue near the high traffic crossing.", distance: "0.3 miles" },
+        { icon: "left", text: "Turn left past the missing sidewalk segment.", distance: "400 feet" },
+        { icon: "pin", text: `Arrive at ${destination || "your destination"}.`, distance: "Destination" }
+      ];
   const submitReport = useCallback(async () => {
-    const report = await submitGapReport({
+    await submitGapReport({
       coordinates: [-84.4124, 33.6961],
       type: selectedReports[0] ?? "Pothole/hazard"
     });
-    setTicket(report.id);
+    setReportSubmitted(true);
+    window.setTimeout(() => {
+      setReportSubmitted(false);
+      setReportOpen(false);
+    }, 1000);
   }, [selectedReports]);
-
-  void destinationCoords;
 
   return (
     <section className="map-panel">
       <RealMap
         destination={destination}
+        startCoords={startCoords}
+        destinationCoords={destinationCoords}
         routeRequest={routeRequest}
         selectedRoute={selectedRoute}
         theme={theme}
@@ -469,12 +687,33 @@ function MapPanel({
         <span><i className="score-orange" /> Risky</span>
         <span><i className="score-red" /> Unsafe</span>
       </div>
+      {routeStatus === "done" && (
+        <div className="directions-widget">
+          <div className="directions-panel">
+            <header>
+              <strong>{selectedRoute === "safe" ? routeData.safe_route.duration_min : routeData.default_route.duration_min} min walking</strong>
+              <span>{selectedRoute === "safe" ? routeData.safe_route.distance_mi : routeData.default_route.distance_mi} mi</span>
+            </header>
+            <ol>
+              {routeSteps.map((step) => (
+                <li key={step.text}>
+                  <DirectionIcon type={step.icon} />
+                  <span>
+                    <strong>{step.text}</strong>
+                    <small>{step.distance}</small>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      )}
       <div className="floating-report">
         {reportOpen && (
           <ReportPanel
             selected={selectedReports}
             setSelected={setSelectedReports}
-            ticket={ticket}
+            submitted={reportSubmitted}
             submit={submitReport}
           />
         )}
@@ -484,4 +723,11 @@ function MapPanel({
       </div>
     </section>
   );
+}
+
+function DirectionIcon({ type }: { type: string }) {
+  if (type === "left") return <CornerUpLeft size={17} />;
+  if (type === "right") return <CornerUpRight size={17} />;
+  if (type === "pin") return <MapPin size={16} />;
+  return <ArrowUp size={17} />;
 }
