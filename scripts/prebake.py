@@ -45,6 +45,15 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "backend"))
 
+# Load backend/.env so factor modules that read env vars at bake time
+# (e.g. hazards.py → SUPABASE_URL / SUPABASE_KEY for gap_reports) are configured.
+try:
+    from dotenv import load_dotenv  # noqa: E402
+
+    load_dotenv(REPO / "backend" / ".env")
+except Exception:  # python-dotenv optional; modules degrade to null defaults
+    pass
+
 import geopandas as gpd  # noqa: E402
 import pandas as pd  # noqa: E402
 

@@ -114,20 +114,22 @@ def _load_atl311() -> gpd.GeoDataFrame:
 def _load_gap_reports() -> gpd.GeoDataFrame:
     """Load gap_reports from Supabase.
 
-    Falls back to an empty GeoDataFrame when SUPABASE_URL / SUPABASE_ANON_KEY are
-    not set so the module stays fully offline-safe.
+    Falls back to an empty GeoDataFrame when Supabase credentials are not set so
+    the module stays fully offline-safe.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_ANON_KEY")
+    # Accept either name: .env uses SUPABASE_KEY, older docs use SUPABASE_ANON_KEY.
+    supabase_key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_KEY")
 
     if not supabase_url or not supabase_key:
         # Null policy: Supabase not configured → empty (offline-safe)
-        logger.debug("SUPABASE_URL/SUPABASE_ANON_KEY not set; skipping gap_reports")
+        logger.debug("SUPABASE_URL / SUPABASE_(ANON_)KEY not set; skipping gap_reports")
         return _empty_hazards()
 
     try:
         from supabase import create_client
-        from shapely import wkb as shapely_wkb
+        from shapely import wkb as shapely_wkb, wkt as shapely_wkt
+        from shapely.geometry import shape as shapely_shape
 
         sb = create_client(supabase_url, supabase_key)
         rows = sb.table("gap_reports").select("id,geom,type").execute().data
@@ -141,16 +143,30 @@ def _load_gap_reports() -> gpd.GeoDataFrame:
             raw_geom = row.get("geom")
             if raw_geom is None:
                 continue
-            try:
-                geoms.append(shapely_wkb.loads(raw_geom, hex=True))
-            except Exception:
+            geom = None
+            if isinstance(raw_geom, dict):
+                # PostgREST returns geography columns as GeoJSON objects.
                 try:
-                    from shapely import wkt as shapely_wkt
-                    geoms.append(shapely_wkt.loads(raw_geom))
+                    geom = shapely_shape(raw_geom)
                 except Exception:
-                    logger.debug("gap_reports: could not parse geom for row %s", row.get("id"))
-                    continue
+                    geom = None
+            else:
+                # Or as hex EWKB / WKT strings, depending on config.
+                try:
+                    geom = shapely_wkb.loads(raw_geom, hex=True)
+                except Exception:
+                    try:
+                        geom = shapely_wkt.loads(raw_geom)
+                    except Exception:
+                        geom = None
+            if geom is None:
+                logger.debug("gap_reports: could not parse geom for row %s", row.get("id"))
+                continue
+            geoms.append(geom)
             hazard_types.append(row.get("type", "other"))
+
+        if not geoms:
+            return _empty_hazards()
 
         gdf = gpd.GeoDataFrame(
             {
@@ -187,7 +203,10 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
         # Null policy: no hazard data → all zeros
         return zeros
 
+    # segment_id is both the index AND a column in the R3 schema; sjoin_nearest's
+    # internal reset_index() collides on it. Keep it only as the index.
     segs_m = segments.to_crs(32616)[["segment_id", "geometry"]].copy()
+    segs_m = segs_m.set_index("segment_id", drop=True)
 
     # Nearest hazard within 20 m of each segment line (true point-to-line distance).
     near = gpd.sjoin_nearest(
@@ -208,5 +227,5 @@ def score(segments: gpd.GeoDataFrame) -> pd.Series:
     matched = matched.assign(_score=matched["weight"].fillna(0.0) * decay)
 
     # max-not-sum: strongest decayed hazard per segment (prevents density bias)
-    agg = matched.groupby("segment_id")["_score"].max()
+    agg = matched.groupby(level=0)["_score"].max()
     return agg.reindex(segments["segment_id"], fill_value=0.0).clip(0.0, 1.0).rename(None)

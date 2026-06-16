@@ -8,8 +8,8 @@
   ],
   "row_count": 30723,
   "crs": "EPSG:4326",
-  "generated_at": "2026-06-16T03:10:22.774710+00:00",
-  "git_head": "1fe68874075997a14ba04d149a589208e55841ed",
+  "generated_at": "2026-06-16T14:55:03.141616+00:00",
+  "git_head": "7f00610ad90c23b063f656f78e50f3b0e2d0f80e",
   "osm_cache_sha256": "e3797621b904b7c4c07dab34c3c3fd54696b2fc94b217a3bca5c48aa77385aee",
   "columns": {
     "sidewalk_cov": {
@@ -42,11 +42,11 @@
     "hazard_norm": {
       "count": 30723,
       "nan": 0,
-      "distinct": 1,
-      "mean": 0.0,
+      "distinct": 24,
+      "mean": 0.0003495041159806533,
       "min": 0.0,
-      "max": 0.0,
-      "stddev": 0.0
+      "max": 0.9996904073220896,
+      "stddev": 0.014607504119017265
     },
     "canopy_pct": {
       "count": 30723,
@@ -69,11 +69,11 @@
     "slope_risk": {
       "count": 30723,
       "nan": 0,
-      "distinct": 1,
-      "mean": 0.0,
+      "distinct": 3566,
+      "mean": 0.08707162128965584,
       "min": 0.0,
-      "max": 0.0,
-      "stddev": 0.0
+      "max": 1.0,
+      "stddev": 0.24603595932641345
     },
     "crossing_penalty": {
       "count": 30723,
@@ -99,13 +99,8 @@
       "distinct": 2
     }
   },
-  "r4_module_failures": [
-    "slope skipped (no_r4 or --skip)"
-  ],
-  "canary_warnings": [
-    "hazard_norm has only 1 distinct value (mean=0.0); module may have silently failed.",
-    "slope_risk has only 1 distinct value (mean=0.0); module may have silently failed."
-  ],
+  "r4_module_failures": [],
+  "canary_warnings": [],
   "head_segment_ids": [
     "1000728744-0000",
     "1000728744-0001",
