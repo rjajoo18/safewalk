@@ -1,12 +1,16 @@
+# Working docs (per-author scratch, not part of the deliverable)
 TASKS.md
+PROGRESS.md
 
 # Python
 __pycache__/
 *.py[cod]
 .venv/
+venv/
 .env
 
-# Claude Code
+# OS / tooling
+.DS_Store
 .claude/
 
 # Data artifacts
