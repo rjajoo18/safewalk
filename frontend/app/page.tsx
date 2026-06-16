@@ -241,7 +241,7 @@ function PreferencePanel() {
 
   const controls: [PreferenceKey, string][] = [
     ["sidewalk", "Sidewalk presence"],
-    ["traffic", "Traffic exposure"],
+    ["traffic", "Low traffic"],
     ["accessibility", "Accessibility"],
     ["shade", "Shade"]
   ];
@@ -643,6 +643,8 @@ function MapPanel({
   const [reportOpen, setReportOpen] = useState(false);
   const [selectedReports, setSelectedReports] = useState<string[]>([]);
   const [reportSubmitted, setReportSubmitted] = useState(false);
+  const [sidewalkVisible, setSidewalkVisible] = useState(true);
+  const [sidewalkReady, setSidewalkReady] = useState(false);
   const routeSteps = selectedRoute === "safe"
     ? [
         { icon: "straight", text: "Head out from your starting point.", distance: "200 feet" },
@@ -679,6 +681,8 @@ function MapPanel({
         routeRequest={routeRequest}
         selectedRoute={selectedRoute}
         theme={theme}
+        sidewalkVisible={sidewalkVisible}
+        onSidewalkLayerAvailable={setSidewalkReady}
         onRouteStatus={onRouteStatus}
       />
       <div className="legend">
@@ -686,6 +690,16 @@ function MapPanel({
         <span><i className="score-yellow" /> Caution</span>
         <span><i className="score-orange" /> Risky</span>
         <span><i className="score-red" /> Unsafe</span>
+        <button
+          className={`sidewalk-toggle ${sidewalkVisible ? "is-visible" : ""}`}
+          onClick={() => setSidewalkVisible((visible) => !visible)}
+          type="button"
+        >
+          <span className="sidewalk-toggle-label">Sidewalk</span>
+          <span className="sidewalk-toggle-hint">
+            {sidewalkReady ? (sidewalkVisible ? "on" : "off") : "Loading..."}
+          </span>
+        </button>
       </div>
       {routeStatus === "done" && (
         <div className="directions-widget">
