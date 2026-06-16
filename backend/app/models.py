@@ -41,3 +41,47 @@ class ScoreResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class RouteSegment(BaseModel):
+    segment_id: str
+    sidewalk_cov: float
+    traffic_risk: float
+    crash_norm: float
+    hazard_norm: float
+    canopy_pct: float
+    exposure_norm: float
+    slope_risk: float
+    length_m: float
+    geometry: dict | None = None
+    risk: float | None = None
+
+
+class SafeRouteResult(BaseModel):
+    segments: list[RouteSegment]
+    total_risk: float
+    distance_m: float
+    explanation: str
+
+
+class FastRouteResult(BaseModel):
+    segments: list[RouteSegment]
+    distance_m: float
+
+
+class RouteResponse(BaseModel):
+    safe_route: SafeRouteResult
+    fast_route: FastRouteResult
+
+
+class SegmentDetailResponse(BaseModel):
+    segment_id: str
+    sidewalk_cov: float
+    traffic_risk: float
+    crash_norm: float
+    hazard_norm: float
+    canopy_pct: float
+    exposure_norm: float
+    slope_risk: float
+    composite_score: float
+    geometry: dict | None = None
