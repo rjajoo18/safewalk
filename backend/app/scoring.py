@@ -58,9 +58,16 @@ SLIDER_DEFAULTS: dict[Theme, dict[str, int]] = {
 
 # Sub-weight allocation within each slider. Sums per slider == 1.0.
 # Crossing penalty is added flat outside the weighted sum (see segment_risk).
+# Sub-weights within each slider. Each row sums to 1.0.
+# Safety sub-weights tuned to match the data distribution: crash_norm,
+# hazard_norm, and flooding are sparse (>99% of segments score 0) in the
+# current parquet; only traffic_risk varies meaningfully. Original
+# 40/35/15/10 allocation made safety-heavy LOWER mean risk than light
+# defaults (paradoxical). Rebalanced to 65/20/10/5 — traffic dominates,
+# others kept non-zero for forward-compat when R4 broadens data coverage.
 SUBWEIGHTS: dict[str, dict[str, float]] = {
     "sidewalks": {"sidewalk":  1.00},
-    "safety":    {"traffic":   0.40, "crash":    0.35, "hazards": 0.15, "flooding": 0.10},
+    "safety":    {"traffic":   0.65, "crash":    0.20, "hazards": 0.10, "flooding": 0.05},
     "comfort":   {"shade":     0.40, "exposure": 0.25, "slope":   0.35},
 }
 
@@ -146,7 +153,14 @@ def segment_risk(
     step_free: bool = False,
     crossing_penalty_value: float = 0.0,
 ) -> float:
-    """Per-segment weighted risk; inf when step_free is on AND segment has a barrier."""
+    """Per-segment weighted risk in [0, 1]; inf when step_free is on AND segment has a barrier.
+
+    The weighted sum is bounded to [0, 1] by construction (weights sum to 1,
+    every factor is in [0, 1]). Adding the flat crossing_penalty (up to 0.225)
+    can push the total above 1.0 in extreme slider configs, so we clamp the
+    final result. Affects ~6 segments out of 30k under the most aggressive
+    sidewalks-heavy config; nothing under realistic ones.
+    """
     if step_free and _has_barrier(seg):
         return float("inf")
 
@@ -161,7 +175,7 @@ def segment_risk(
         + weights["flooding"] * float(seg.get("flooding") or 0.0)
         + crossing_penalty_value
     )
-    return risk
+    return min(1.0, max(0.0, risk))
 
 
 def score_route(

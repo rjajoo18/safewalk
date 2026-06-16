@@ -16,10 +16,23 @@ from app.segments import SEGMENT_COLUMNS, SegmentStore
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_HIGHWAYS = frozenset(
-    {"footway", "path", "residential", "living_street", "pedestrian", "service", "tertiary"}
-)
-FORBIDDEN_HIGHWAYS = frozenset({"motorway", "trunk", "primary", "motorway_link", "trunk_link", "primary_link"})
+# Walkable OSM `highway` classes. Includes arterials (primary/secondary) because
+# pedestrians DO walk on them — that's the Marcus / Gillem story per DESIGN.md §11.
+# Their elevated `traffic_risk` naturally penalizes them in the safe-route
+# Dijkstra; the fast-route Dijkstra still uses them when they're the shortest.
+# Earlier exclusion of `primary` fragmented the graph into many islands
+# (largest connected component was only ~10% of nodes), making most realistic
+# Gillem-area OD pairs unroutable.
+ALLOWED_HIGHWAYS = frozenset({
+    "footway", "path", "pedestrian", "steps",
+    "residential", "living_street", "service", "unclassified",
+    "tertiary", "tertiary_link",
+    "secondary", "secondary_link",
+    "primary", "primary_link",
+})
+
+# Pedestrians are legally barred from motorways/trunks. Hard exclude.
+FORBIDDEN_HIGHWAYS = frozenset({"motorway", "motorway_link", "trunk", "trunk_link"})
 SNAP_MAX_M = 300.0
 NODE_PRECISION_M = 0.5
 
@@ -250,7 +263,13 @@ class GraphRouter:
             safe_segments.append(seg)
             risks.append(risk)
 
-        mean_risk = sum(risks) / len(risks) if risks else float("inf")
+        # Mean over finite-risk segments only — if step_free=True and the only
+        # available path includes an unavoidable barrier, those segments report
+        # inf risk. Excluding them keeps mean_risk informative about the rest
+        # of the route. Callers can still detect barrier presence by checking
+        # `any(s["risk"] == float("inf") for s in safe_segments)`.
+        finite_risks = [r for r in risks if r != float("inf")]
+        mean_risk = sum(finite_risks) / len(finite_risks) if finite_risks else float("inf")
         safe_distance = sum(float(s.get("length_m") or 0.0) for s in safe_segments)
 
         return safe_segments, fast_segments, mean_risk, safe_distance, fast_distance, total_risk
