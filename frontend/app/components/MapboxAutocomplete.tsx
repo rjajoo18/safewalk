@@ -15,7 +15,8 @@ type MapboxAutocompleteProps = {
   placeholder?: string;
 };
 
-const georgiaBbox = "-85.6052,30.3579,-80.8397,35.0007";
+const georgiaBbox = "-84.47,33.55,-84.22,33.70";
+const geocoderProximity = "-84.33,33.615";
 
 const georgiaPlaces: Suggestion[] = [
   { id: "ga-gillem-logistics", place_name: "Gillem Logistics Center, Forest Park, GA", center: [-84.33703, 33.61649] },
@@ -81,7 +82,7 @@ export default function MapboxAutocomplete({
         if (token) {
           const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
             query
-          )}.json?access_token=${token}&autocomplete=true&country=us&bbox=${georgiaBbox}&types=address,poi,place,locality,neighborhood&proximity=-84.3880,33.7490`;
+          )}.json?access_token=${token}&autocomplete=true&country=us&bbox=${georgiaBbox}&types=address,poi,place,locality,neighborhood&proximity=${geocoderProximity}`;
           const res = await fetch(url, { signal: controller.signal });
           const data = (await res.json()) as { features?: Suggestion[] };
           setSuggestions(dedupeSuggestions([...localSuggestions, ...(data.features ?? [])]).slice(0, 8));

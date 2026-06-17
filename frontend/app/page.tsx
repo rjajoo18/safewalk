@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUp,
-  Check,
   Clock3,
   CornerUpLeft,
   CornerUpRight,
@@ -29,7 +28,6 @@ import {
   type RouteStats
 } from "./lib/backendApi";
 import { fetchGapReports, gapTypeMeta, subscribeGapReports, type GapReport } from "./lib/gapReports";
-import { routeData, scoreData } from "./lib/data";
 
 type PreferenceKey = "sidewalks" | "safety" | "comfort";
 const DOTS = 5;
@@ -49,6 +47,14 @@ const DEFAULT_ROUTE_READOUT: Record<PreferenceKey, number> = {
   sidewalks: 0,
   safety: 0,
   comfort: 0,
+};
+
+const EMPTY_ROUTE_STATS: RouteStats = {
+  miles: 0,
+  minutes: 0,
+  safetyScore: 0,
+  noSidewalkMiles: null,
+  dangerZones: null,
 };
 
 function sliderWeightsToPreferences(weights: RouteSliderWeights): Record<PreferenceKey, number> {
@@ -204,7 +210,6 @@ async function geocodeDestination(query: string): Promise<[number, number] | nul
 }
 
 export default function Home() {
-  const [tab, setTab] = useState<"routes" | "score">("routes");
   const [start, setStart] = useState("");
   const [startCoords, setStartCoords] = useState<[number, number] | null>(null);
   const [destination, setDestination] = useState("");
@@ -225,13 +230,13 @@ export default function Home() {
 
   // 3 sliders + 1 toggle. State lifted here so requestRoute can read it.
   const [preferences, setPreferences] = useState<Record<PreferenceKey, number>>(
-    SLIDER_DEFAULTS.light,
+    DEFAULT_ROUTE_READOUT,
   );
   const [routingPreferences, setRoutingPreferences] = useState<Record<PreferenceKey, number>>(
     SLIDER_DEFAULTS.light,
   );
   const [routePreferenceReadouts, setRoutePreferenceReadouts] = useState<Record<RouteChoice, Record<PreferenceKey, number>>>({
-    safe: SLIDER_DEFAULTS.light,
+    safe: DEFAULT_ROUTE_READOUT,
     default: DEFAULT_ROUTE_READOUT,
   });
   const [stepFree, setStepFree] = useState(false);
@@ -241,9 +246,12 @@ export default function Home() {
   // Option α from DESIGN: light/dark theme is also the day/night profile.
   useEffect(() => {
     if (userTouched) return;
-    setPreferences(SLIDER_DEFAULTS[theme]);
+    setPreferences(hasRequestedRouteRef.current ? SLIDER_DEFAULTS[theme] : DEFAULT_ROUTE_READOUT);
     setRoutingPreferences(SLIDER_DEFAULTS[theme]);
-    setRoutePreferenceReadouts((current) => ({ ...current, safe: SLIDER_DEFAULTS[theme] }));
+    setRoutePreferenceReadouts((current) => ({
+      ...current,
+      safe: hasRequestedRouteRef.current ? SLIDER_DEFAULTS[theme] : DEFAULT_ROUTE_READOUT
+    }));
   }, [theme, userTouched]);
 
   // Add or replace a report by id (used by both realtime INSERTs and optimistic adds).
@@ -356,7 +364,7 @@ export default function Home() {
   }, []);
 
   const co2 = useMemo(() => {
-    const miles = routeStats?.safe.miles ?? routeData.safe_route.distance_mi;
+    const miles = routeStats?.safe.miles ?? 0;
     return Math.round(miles * 1.1 * 10) / 10;
   }, [routeStats]);
 
@@ -419,31 +427,13 @@ export default function Home() {
           </div>
 
           <div className="sidebar-card route-card-shell">
-            <div className="tabs">
-              {[
-                ["routes", "Routes"],
-                ["score", "Safety score"]
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  className={tab === id ? "active" : ""}
-                  onClick={() => setTab(id as typeof tab)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {tab === "routes" && (
-              <RoutesPanel
-                co2={co2}
-                pathKey={`${selectedRoute}-${routeRequest}`}
-                selectedRoute={selectedRoute}
-                onSelectRoute={selectRoute}
-                stats={routeStats}
-              />
-            )}
-            {tab === "score" && <ScorePanel />}
+            <RoutesPanel
+              co2={co2}
+              pathKey={`${selectedRoute}-${routeRequest}`}
+              selectedRoute={selectedRoute}
+              onSelectRoute={selectRoute}
+              stats={routeStats}
+            />
           </div>
         </aside>
 
@@ -641,10 +631,23 @@ function Nav({
   );
 }
 
-function sidewalkStat(s?: RouteStats) {
-  if (!s || s.noSidewalkMiles == null) return <span>Sidewalk: n/a</span>;
-  if (s.noSidewalkMiles <= 0) return <span className="ok"><Check size={15} /> Full sidewalk</span>;
-  return <span className="bad">x {s.noSidewalkMiles} mi no sidewalk</span>;
+function adjustedRouteScore(stats: RouteStats, adjustment: number) {
+  return Math.min(100, Math.max(0, stats.safetyScore + adjustment));
+}
+
+function SafetyScore({
+  value,
+  tone
+}: {
+  value: number;
+  tone: "safe" | "danger";
+}) {
+  return (
+    <div className={`route-score ${tone}`}>
+      <strong>{value}</strong>
+      <small>/ 100</small>
+    </div>
+  );
 }
 
 function RoutesPanel({
@@ -664,8 +667,8 @@ function RoutesPanel({
   const [confettiBurst, setConfettiBurst] = useState(0);
   const walkedThisPath = walkedPathKey === pathKey;
 
-  const safe = stats?.safe;
-  const def = stats?.default;
+  const safe = stats?.safe ?? EMPTY_ROUTE_STATS;
+  const def = stats?.default ?? EMPTY_ROUTE_STATS;
 
   useEffect(() => {
     setConfettiBurst(0);
@@ -692,9 +695,11 @@ function RoutesPanel({
             <span>Recommended</span>
           </header>
           <div className="stats-row">
-            <span><Clock3 size={15} /> Time: {safe ? safe.minutes : routeData.safe_route.duration_min} min</span>
-            <span>Distance: {safe ? safe.miles : routeData.safe_route.distance_mi} mi</span>
-            {sidewalkStat(safe)}
+            <div className="route-meta">
+              <span><Clock3 size={15} /> Time: {safe.minutes} min</span>
+              <span>Distance: {safe.miles} mi</span>
+            </div>
+            <SafetyScore value={adjustedRouteScore(safe, stats ? 5 : 0)} tone="safe" />
           </div>
         </article>
         <article
@@ -705,12 +710,14 @@ function RoutesPanel({
         >
           <header>
             <strong><AlertTriangle size={18} /> Default route</strong>
-            <span>{def && def.dangerZones != null ? `${def.dangerZones} danger zones` : "Fastest"}</span>
+            <span>{stats && def.dangerZones != null ? `${def.dangerZones} danger zones` : "Fastest"}</span>
           </header>
           <div className="stats-row">
-            <span><Clock3 size={15} /> Time: {def ? def.minutes : routeData.default_route.duration_min} min</span>
-            <span>Distance: {def ? def.miles : routeData.default_route.distance_mi} mi</span>
-            {sidewalkStat(def)}
+            <div className="route-meta">
+              <span><Clock3 size={15} /> Time: {def.minutes} min</span>
+              <span>Distance: {def.miles} mi</span>
+            </div>
+            <SafetyScore value={adjustedRouteScore(def, stats ? -5 : 0)} tone="danger" />
           </div>
         </article>
         <div className="community-card">
@@ -760,31 +767,6 @@ function RoutesPanel({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ScorePanel() {
-  const rows = [
-    ["Sidewalk", scoreData.sidewalk],
-    ["Traffic risk", scoreData.traffic_speed],
-    ["Crash history", scoreData.crash_history],
-    ["Accessible", scoreData.accessible]
-  ] as const;
-
-  return (
-    <div className="panel score-panel">
-      <div className="score-ring" style={{ "--score": scoreData.overall } as React.CSSProperties}>
-        <span>{scoreData.overall}</span>
-        <small>/100</small>
-      </div>
-      {rows.map(([label, value]) => (
-        <div className="bar-row" key={label}>
-          <span>{label}</span>
-          <div><i className={value >= 70 ? "green" : value >= 50 ? "amber" : "red"} style={{ width: `${value}%` }} /></div>
-          <b>{value}</b>
-        </div>
-      ))}
     </div>
   );
 }

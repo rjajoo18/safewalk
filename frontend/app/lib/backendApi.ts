@@ -46,6 +46,7 @@ export type RouteApiSegment = {
 export type RouteStats = {
   miles: number;
   minutes: number;
+  safetyScore: number;
   noSidewalkMiles: number | null; // null = unknown (OSRM fallback, outside corridor)
   dangerZones: number | null;
 };
@@ -200,11 +201,16 @@ export function computeRouteStats(segments: RouteApiSegment[], distanceM: number
   let noSidewalkM = 0;
   let dangerZones = 0;
   let inDanger = false;
+  let weightedScore = 0;
+  let scoredMeters = 0;
 
   for (const seg of segments) {
     const len = seg.length_m ?? 0;
     if ((seg.sidewalk_cov ?? 1) < NO_SIDEWALK_COV) noSidewalkM += len;
     const displayRisk = seg.display_score != null ? 1 - seg.display_score / 100 : seg.risk ?? 0;
+    const displayScore = seg.display_score ?? Math.round((1 - (seg.risk ?? 0)) * 100);
+    weightedScore += displayScore * len;
+    scoredMeters += len;
     const risky = displayRisk >= DANGER_RISK;
     if (risky && !inDanger) dangerZones += 1;
     inDanger = risky;
@@ -213,6 +219,7 @@ export function computeRouteStats(segments: RouteApiSegment[], distanceM: number
   return {
     miles: Math.round((distanceM / METERS_PER_MILE) * 10) / 10,
     minutes: Math.max(1, Math.round(distanceM / WALK_MPS / 60)),
+    safetyScore: Math.round(scoredMeters > 0 ? weightedScore / scoredMeters : 0),
     noSidewalkMiles: Math.round((noSidewalkM / METERS_PER_MILE) * 10) / 10,
     dangerZones
   };
@@ -238,6 +245,7 @@ export function osrmRouteStats(features: GeoJSON.FeatureCollection): RouteStats 
   return {
     miles: Math.round((meters / METERS_PER_MILE) * 10) / 10,
     minutes: Math.max(1, Math.round(meters / WALK_MPS / 60)),
+    safetyScore: 70,
     noSidewalkMiles: null,
     dangerZones: null
   };
