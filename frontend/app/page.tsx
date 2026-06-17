@@ -13,6 +13,7 @@ import {
   Shield,
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapboxAutocomplete from "./components/MapboxAutocomplete";
 import type { RouteChoice, RouteStatus } from "./components/RealMap";
@@ -605,9 +606,9 @@ function Nav({
         Safewalk
       </div>
       <div className="nav-links">
-        <a href="/">Map</a>
-        <a href="/status">Status</a>
-        <a>About</a>
+        <Link className="active" href="/">Map</Link>
+        <Link href="/status">Status</Link>
+        <Link href="/about">About</Link>
       </div>
       <button className={`theme-toggle ${theme === "dark" ? "is-dark" : ""}`} onClick={onToggleTheme} type="button">
         <svg
