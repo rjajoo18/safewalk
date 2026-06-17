@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MapboxAutocomplete from "./components/MapboxAutocomplete";
 import type { RouteChoice, RouteStatus } from "./components/RealMap";
@@ -24,11 +25,10 @@ import {
   NoRouteError,
   osrmRouteStats,
   segmentsToFeatures,
-  submitGapReport as submitGapReportToBackend,
   type RouteSliderWeights,
   type RouteStats
 } from "./lib/backendApi";
-import { fetchGapReports, gapTypeMeta, subscribeGapReports, type GapReport } from "./lib/gapReports";
+import { fetchGapReports, subscribeGapReports, type GapReport } from "./lib/gapReports";
 
 type PreferenceKey = "sidewalks" | "safety" | "comfort";
 const DOTS = 5;
@@ -457,7 +457,6 @@ export default function Home() {
           routeFeatures={routeFeatures}
           routeStats={routeStats}
           gapReports={gapReports}
-          onNewReport={upsertGapReport}
         />
       </section>
     </main>
@@ -779,74 +778,6 @@ function RoutesPanel({
   );
 }
 
-type ReportStatus = "idle" | "verifying" | "verified" | "rejected" | "error";
-
-function ReportPanel({
-  pendingPin,
-  photoPreview,
-  hasPhoto,
-  note,
-  setNote,
-  onPhotoSelected,
-  status,
-  message,
-  onSubmit
-}: {
-  pendingPin: [number, number] | null;
-  photoPreview: string | null;
-  hasPhoto: boolean;
-  note: string;
-  setNote: (value: string) => void;
-  onPhotoSelected: (file: File | null) => void;
-  status: ReportStatus;
-  message: string;
-  onSubmit: () => void;
-}) {
-  const canSubmit = Boolean(pendingPin) && status !== "verifying";
-
-  return (
-    <div className="panel report-panel">
-      <p className="report-step">
-        <b>1.</b> Tap the map to mark the spot{" "}
-        {pendingPin ? "✓" : "(tap to drop a pin)"}
-      </p>
-      <p className="report-step">
-        <b>2.</b> Add a photo of the gap (optional)
-      </p>
-      <input
-        className="report-photo-input"
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={(event) => onPhotoSelected(event.target.files?.[0] ?? null)}
-      />
-      {photoPreview && <img className="report-thumb" src={photoPreview} alt="Gap preview" />}
-      <input
-        className="report-note-input"
-        type="text"
-        placeholder="Add a note (optional)"
-        value={note}
-        onChange={(event) => setNote(event.target.value)}
-      />
-      <button className="primary-btn" onClick={onSubmit} disabled={!canSubmit}>
-        {status === "verifying"
-          ? hasPhoto ? "Verifying photo..." : "Submitting report..."
-          : "Submit report"} <ArrowRight size={18} />
-      </button>
-      {message && (
-        <p
-          className={`report-status ${
-            status === "verified" ? "ok" : status === "rejected" || status === "error" ? "bad" : ""
-          }`}
-        >
-          {message}
-        </p>
-      )}
-      <small>Anonymous · geotagged · live on the map</small>
-    </div>
-  );
-}
-
 function MapPanel({
   destination,
   startCoords,
@@ -858,8 +789,7 @@ function MapPanel({
   onRouteStatus,
   routeFeatures,
   routeStats,
-  gapReports,
-  onNewReport
+  gapReports
 }: {
   destination: string;
   startCoords: [number, number] | null;
@@ -872,74 +802,26 @@ function MapPanel({
   routeFeatures: GeoJSON.FeatureCollection | null;
   routeStats: Record<RouteChoice, RouteStats> | null;
   gapReports: GapReport[];
-  onNewReport: (report: GapReport) => void;
 }) {
-  const [reportOpen, setReportOpen] = useState(false);
+  const router = useRouter();
+  // Picking mode: when on, a map click drops the pin for a new gap report. The
+  // user then continues to the dedicated /report page (AI photo verification)
+  // with the chosen coordinates carried along.
+  const [picking, setPicking] = useState(false);
   const [pendingPin, setPendingPin] = useState<[number, number] | null>(null);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [note, setNote] = useState("");
-  const [reportStatus, setReportStatus] = useState<ReportStatus>("idle");
-  const [reportMessage, setReportMessage] = useState("");
-
-  const resetReport = useCallback(() => {
-    setReportOpen(false);
-    setPendingPin(null);
-    setNote("");
-    setReportStatus("idle");
-    setReportMessage("");
-    setPhotoFile(null);
-    setPhotoPreview((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return null;
-    });
-  }, []);
-
-  const choosePhoto = useCallback((file: File | null) => {
-    setReportStatus("idle");
-    setReportMessage("");
-    setPhotoFile(file);
-    setPhotoPreview((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return file ? URL.createObjectURL(file) : null;
-    });
-  }, []);
-
-  const submitReport = useCallback(async () => {
-    if (!pendingPin) return;
-    setReportStatus("verifying");
-    setReportMessage(photoFile ? "Claude is analyzing your photo..." : "Submitting your report...");
-    try {
-      const result = await submitGapReportToBackend({
-        photo: photoFile,
-        coordinates: pendingPin,
-        note: note.trim() || undefined
-      });
-      if (result.verified && result.report) {
-        onNewReport(result.report);
-        setReportStatus("verified");
-        setReportMessage(
-          photoFile
-            ? `AI confirmed: ${gapTypeMeta(result.report.type).label}. Pin is live on the map.`
-            : "Report submitted. Pin is live on the map."
-        );
-        window.setTimeout(resetReport, 2200);
-      } else {
-        setReportStatus("rejected");
-        setReportMessage(result.reason ?? "Couldn't confirm a gap. Try a clearer photo.");
-      }
-    } catch (error) {
-      setReportStatus("error");
-      setReportMessage(error instanceof Error ? error.message : "Something went wrong.");
-    }
-  }, [note, onNewReport, pendingPin, photoFile, resetReport]);
 
   const toggleReport = useCallback(() => {
-    setReportOpen((open) => {
-      if (open) resetReport();
+    setPicking((open) => {
+      if (open) setPendingPin(null);
       return !open;
     });
-  }, [resetReport]);
+  }, []);
+
+  const goToReport = useCallback(() => {
+    if (!pendingPin) return;
+    const [lng, lat] = pendingPin;
+    router.push(`/report?lng=${lng}&lat=${lat}`);
+  }, [pendingPin, router]);
 
   const [sidewalkVisible, setSidewalkVisible] = useState(true);
   const [sidewalkReady, setSidewalkReady] = useState(false);
@@ -965,7 +847,7 @@ function MapPanel({
         onRouteStatus={onRouteStatus}
         routeFeatures={routeFeatures}
         gapReports={gapReports}
-        pickingLocation={reportOpen}
+        pickingLocation={picking}
         pendingPin={pendingPin}
         onPickLocation={setPendingPin}
       />
@@ -1007,21 +889,20 @@ function MapPanel({
         </div>
       )}
       <div className="floating-report">
-        {reportOpen && (
-          <ReportPanel
-            pendingPin={pendingPin}
-            photoPreview={photoPreview}
-            hasPhoto={Boolean(photoFile)}
-            note={note}
-            setNote={setNote}
-            onPhotoSelected={choosePhoto}
-            status={reportStatus}
-            message={reportMessage}
-            onSubmit={submitReport}
-          />
+        {picking && (
+          <div className="panel report-panel">
+            <p className="report-step">
+              <b>1.</b> Tap the map where the gap is{" "}
+              {pendingPin ? "✓" : "(tap to drop a pin)"}
+            </p>
+            <button className="primary-btn" onClick={goToReport} disabled={!pendingPin}>
+              Report a gap here <ArrowRight size={18} />
+            </button>
+            <small>You&apos;ll add a photo for AI verification on the next step.</small>
+          </div>
         )}
         <button className="report-fab" onClick={toggleReport}>
-          {reportOpen ? "Close" : "Report gap"}
+          {picking ? "Cancel" : "Report gap"}
         </button>
       </div>
     </section>

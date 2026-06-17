@@ -14,8 +14,9 @@ import {
   Wrench
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ComponentType } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { analyzeGapPhoto, submitVerifiedGap, type AnalyzeGapResult } from "../lib/gapReports";
 
 type IssueOption = {
@@ -86,6 +87,20 @@ async function geocodeAddress(query: string): Promise<ReportLocation | null> {
 }
 
 export default function ReportPage() {
+  return (
+    <Suspense fallback={<main className="report-page-shell"><ReportNav /></main>}>
+      <ReportPageInner />
+    </Suspense>
+  );
+}
+
+function ReportPageInner() {
+  const searchParams = useSearchParams();
+  // Coordinates handed off from the map's "Report a gap here" button, if any.
+  const pickedLng = Number.parseFloat(searchParams.get("lng") ?? "");
+  const pickedLat = Number.parseFloat(searchParams.get("lat") ?? "");
+  const hasPickedCoords = Number.isFinite(pickedLng) && Number.isFinite(pickedLat);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -104,7 +119,18 @@ export default function ReportPage() {
   const [analyzeState, setAnalyzeState] = useState<AnalyzeState>("idle");
   const [analyzeError, setAnalyzeError] = useState("");
 
+  // If the map handed us coordinates, use those instead of geolocation.
   useEffect(() => {
+    if (!hasPickedCoords) return;
+    const coords: [number, number] = [pickedLng, pickedLat];
+    setLocation({ coords, name: "Selected on map", source: "picked on the map" });
+    reverseGeocode(coords)
+      .then((name) => setLocation({ coords, name, source: "picked on the map" }))
+      .catch(() => {});
+  }, [hasPickedCoords, pickedLng, pickedLat]);
+
+  useEffect(() => {
+    if (hasPickedCoords) return; // a map-picked location takes priority
     if (!navigator.geolocation) {
       setLocation({
         coords: [-84.388, 33.749],
@@ -134,7 +160,7 @@ export default function ReportPage() {
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
-  }, []);
+  }, [hasPickedCoords]);
 
   useEffect(() => {
     return () => {
