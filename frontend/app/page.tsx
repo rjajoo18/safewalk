@@ -29,6 +29,9 @@ import { useTheme } from "./lib/theme";
 
 type PreferenceKey = "sidewalks" | "safety" | "comfort";
 const DOTS = 5;
+const COMMUNITY_ROUTE_MAX = 20;
+const INITIAL_COMMUNITY_ROUTES = 3;
+const CO2_PER_WALK_KG = 2.1;
 
 // Each slider dot maps to 0/25/50/75/100 on the backend's 0–100 scale.
 const SLIDER_SCALE = 25;
@@ -368,11 +371,6 @@ export default function Home() {
     setUserTouched(true);
   }, []);
 
-  const co2 = useMemo(() => {
-    const miles = routeStats?.safe.miles ?? 0;
-    return Math.round(miles * 1.1 * 10) / 10;
-  }, [routeStats]);
-
   return (
     <main className={`app-shell ${theme === "dark" ? "dark-mode" : ""}`}>
       <Nav />
@@ -433,7 +431,6 @@ export default function Home() {
 
           <div className="sidebar-card route-card-shell">
             <RoutesPanel
-              co2={co2}
               pathKey={`${selectedRoute}-${routeRequest}`}
               selectedRoute={selectedRoute}
               onSelectRoute={selectRoute}
@@ -608,13 +605,11 @@ function SafetyScore({
 }
 
 function RoutesPanel({
-  co2,
   pathKey,
   selectedRoute,
   onSelectRoute,
   stats
 }: {
-  co2: number;
   pathKey: string;
   selectedRoute: RouteChoice;
   onSelectRoute: (route: RouteChoice) => void;
@@ -622,18 +617,21 @@ function RoutesPanel({
 }) {
   const [walkedPathKey, setWalkedPathKey] = useState<string | null>(null);
   const [confettiBurst, setConfettiBurst] = useState(0);
+  const [communityRoutes, setCommunityRoutes] = useState(INITIAL_COMMUNITY_ROUTES);
   const walkedThisPath = walkedPathKey === pathKey;
 
   const safe = stats?.safe ?? EMPTY_ROUTE_STATS;
   const def = stats?.default ?? EMPTY_ROUTE_STATS;
+  const routeWalkCo2 = ((communityRoutes - INITIAL_COMMUNITY_ROUTES) * CO2_PER_WALK_KG).toFixed(1);
+  const communityCo2 = (communityRoutes * CO2_PER_WALK_KG).toFixed(1);
 
   useEffect(() => {
     setConfettiBurst(0);
   }, [pathKey]);
 
   const countWalk = () => {
-    if (walkedThisPath) return;
     setWalkedPathKey(pathKey);
+    setCommunityRoutes((count) => Math.min(COMMUNITY_ROUTE_MAX, count + 1));
     setConfettiBurst((burst) => burst + 1);
   };
 
@@ -680,20 +678,20 @@ function RoutesPanel({
         <div className="community-card">
           <div className="community-title">Community impact today</div>
           <div className="community-progress">
-            <i />
+            <i style={{ width: `${(communityRoutes / COMMUNITY_ROUTE_MAX) * 100}%` }} />
           </div>
           <div className="community-scale">
             <span>0</span>
-            <span>312 routes planned</span>
-            <span>500</span>
+            <span>{communityRoutes} routes planned</span>
+            <span>{COMMUNITY_ROUTE_MAX}</span>
           </div>
           <div className="community-stats">
             <div>
-              <strong>{co2} kg</strong>
+              <strong>{routeWalkCo2} kg</strong>
               <span>CO2 saved this route</span>
             </div>
             <div>
-              <strong>374 kg</strong>
+              <strong>{communityCo2} kg</strong>
               <span>saved today total</span>
             </div>
           </div>
@@ -718,7 +716,6 @@ function RoutesPanel({
             className={`walk-route-btn ${walkedThisPath ? "is-counted" : ""}`}
             type="button"
             onClick={countWalk}
-            disabled={walkedThisPath}
           >
             {walkedThisPath ? "Walk counted" : "I walked this route"}
           </button>
