@@ -1,7 +1,6 @@
 "use client";
 
-import { ArrowLeft, Footprints } from "lucide-react";
-import Link from "next/link";
+import Nav from "../components/Nav";
 
 const GALLERY = [
   {
@@ -19,7 +18,7 @@ const GALLERY = [
 export default function AboutPage() {
   return (
     <main className="about-page-shell">
-      <AboutNav />
+      <Nav />
       <section className="about-wrap">
         <header className="about-hero">
           <article className="about-card about-copy-card">
@@ -123,21 +122,3 @@ export default function AboutPage() {
   );
 }
 
-function AboutNav() {
-  return (
-    <nav className="nav">
-      <div className="brand">
-        <span><Footprints size={21} /></span>
-        Safewalk
-      </div>
-      <div className="nav-links">
-        <Link href="/">Map</Link>
-        <Link className="active" href="/about">About</Link>
-      </div>
-      <Link className="report-back-link" href="/">
-        <ArrowLeft size={17} />
-        Map
-      </Link>
-    </nav>
-  );
-}

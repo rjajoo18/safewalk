@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import Nav from "../components/Nav";
 import {
   fetchGapReports,
   gapTypeMeta,
   STATUS_META,
   STATUS_ORDER,
   statusMeta,
+  subscribeGapReports,
   updateGapStatus,
   type GapReport,
   type GapStatus
@@ -19,15 +21,26 @@ export default function StatusPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setReports(await fetchGapReports());
-    setLoading(false);
-  }, []);
-
+  // Prepopulate from Supabase (via the backend, falling back to a direct read).
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    fetchGapReports().then((rows) => {
+      if (!active) return;
+      setReports(rows);
+      setLoading(false);
+    });
+
+    // Keep the list live: new reports stream in as pins are created.
+    const unsubscribe = subscribeGapReports((report) => {
+      if (!active) return;
+      setReports((current) => [report, ...current.filter((r) => r.id !== report.id)]);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const changeStatus = useCallback(
     async (id: string, status: GapStatus) => {
@@ -46,93 +59,109 @@ export default function StatusPage() {
   );
 
   return (
-    <main style={{ maxWidth: 880, margin: "0 auto", padding: "32px 20px", fontFamily: "inherit" }}>
-      <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, margin: 0 }}>Gap report status</h1>
-        <Link href="/" style={{ fontSize: 14, color: "#1d9e75" }}>← Back to map</Link>
-      </header>
+    <div style={{ height: "100dvh", overflowY: "auto" }}>
+      <Nav />
+      <main style={{ maxWidth: 880, margin: "0 auto", padding: "32px 20px", fontFamily: "inherit" }}>
+        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12 }}>
+          <h1 style={{ fontSize: 24, margin: 0 }}>Reports</h1>
+          <Link
+            href="/report"
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "#fff",
+              background: "#1d9e75",
+              padding: "8px 14px",
+              borderRadius: 9,
+              textDecoration: "none"
+            }}
+          >
+            + Report a gap
+          </Link>
+        </header>
 
-      {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
+        {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
 
-      {loading ? (
-        <p style={{ color: "#888" }}>Loading reports…</p>
-      ) : reports.length === 0 ? (
-        <p style={{ color: "#888" }}>No gap reports yet.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          {reports.map((report) => {
-            const type = gapTypeMeta(report.type);
-            const status = statusMeta(report.status);
-            return (
-              <li
-                key={report.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 16,
-                  padding: "12px 16px",
-                  border: "1px solid #e5e5df",
-                  borderRadius: 12,
-                  background: "#fff"
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong style={{ fontSize: 14 }}>{type.label}</strong>
-                    <span
-                      style={{
-                        padding: "1px 8px",
-                        borderRadius: 999,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "#fff",
-                        background: status.color
-                      }}
-                    >
-                      {status.label}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
-                    {report.note || "—"}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
-                    {report.reported_at ? new Date(report.reported_at).toLocaleString() : ""}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  {STATUS_ORDER.map((key) => {
-                    const active = report.status === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        disabled={active || busyId === report.id}
-                        onClick={() => changeStatus(report.id, key)}
-                        title={`Mark ${STATUS_META[key].label}`}
+        {loading ? (
+          <p style={{ color: "#888" }}>Loading reports…</p>
+        ) : reports.length === 0 ? (
+          <p style={{ color: "#888" }}>No gap reports yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+            {reports.map((report) => {
+              const type = gapTypeMeta(report.type);
+              const status = statusMeta(report.status);
+              return (
+                <li
+                  key={report.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 16,
+                    padding: "12px 16px",
+                    border: "1px solid #e5e5df",
+                    borderRadius: 12,
+                    background: "#fff"
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 14 }}>{type.label}</strong>
+                      <span
                         style={{
-                          padding: "5px 10px",
-                          borderRadius: 8,
-                          fontSize: 12,
+                          padding: "1px 8px",
+                          borderRadius: 999,
+                          fontSize: 11,
                           fontWeight: 600,
-                          cursor: active ? "default" : "pointer",
-                          border: `1px solid ${STATUS_META[key].color}`,
-                          background: active ? STATUS_META[key].color : "transparent",
-                          color: active ? "#fff" : STATUS_META[key].color,
-                          opacity: busyId === report.id && !active ? 0.5 : 1
+                          color: "#fff",
+                          background: status.color
                         }}
                       >
-                        {STATUS_META[key].label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+                        {status.label}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                      {report.note || "—"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                      {report.reported_at ? new Date(report.reported_at).toLocaleString() : ""}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    {STATUS_ORDER.map((key) => {
+                      const active = report.status === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          disabled={active || busyId === report.id}
+                          onClick={() => changeStatus(report.id, key)}
+                          title={`Mark ${STATUS_META[key].label}`}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 8,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: active ? "default" : "pointer",
+                            border: `1px solid ${STATUS_META[key].color}`,
+                            background: active ? STATUS_META[key].color : "transparent",
+                            color: active ? "#fff" : STATUS_META[key].color,
+                            opacity: busyId === report.id && !active ? 0.5 : 1
+                          }}
+                        >
+                          {STATUS_META[key].label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+    </div>
   );
 }

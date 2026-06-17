@@ -2,12 +2,10 @@
 
 import {
   Accessibility,
-  ArrowLeft,
   Camera,
   Car,
   Check,
   Construction,
-  Footprints,
   LightbulbOff,
   MapPin,
   Send,
@@ -17,6 +15,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { ComponentType } from "react";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Nav from "../components/Nav";
 import { analyzeGapPhoto, submitVerifiedGap, type AnalyzeGapResult } from "../lib/gapReports";
 
 type IssueOption = {
@@ -88,7 +87,7 @@ async function geocodeAddress(query: string): Promise<ReportLocation | null> {
 
 export default function ReportPage() {
   return (
-    <Suspense fallback={<main className="report-page-shell"><ReportNav /></main>}>
+    <Suspense fallback={<main className="report-page-shell"><Nav /></main>}>
       <ReportPageInner />
     </Suspense>
   );
@@ -275,7 +274,7 @@ function ReportPageInner() {
   if (ticket) {
     return (
       <main className="report-page-shell">
-        <ReportNav />
+        <Nav />
         <section className="report-success-page">
           <div className="report-success-icon"><Check size={28} /></div>
           <h1>Report submitted</h1>
@@ -295,7 +294,7 @@ function ReportPageInner() {
 
   return (
     <main className="report-page-shell">
-      <ReportNav />
+      <Nav />
       <section className="report-form-wrap">
         <header className="report-header">
           <p>Community reporting</p>
@@ -443,22 +442,3 @@ function ReportPageInner() {
   );
 }
 
-function ReportNav() {
-  return (
-    <nav className="nav">
-      <div className="brand">
-        <span><Footprints size={21} /></span>
-        Safewalk
-      </div>
-      <div className="nav-links">
-        <Link href="/">Map</Link>
-        <Link className="active" href="/report">Report</Link>
-        <a>About</a>
-      </div>
-      <Link className="report-back-link" href="/">
-        <ArrowLeft size={17} />
-        Map
-      </Link>
-    </nav>
-  );
-}

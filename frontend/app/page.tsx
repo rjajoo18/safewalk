@@ -6,13 +6,12 @@ import {
   CornerUpLeft,
   CornerUpRight,
   Flag,
-  Footprints,
   MapPin,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Nav from "./components/Nav";
 import MapboxAutocomplete from "./components/MapboxAutocomplete";
 import type { RouteChoice, RouteStatus } from "./components/RealMap";
 import {
@@ -26,6 +25,7 @@ import {
   type RouteStats
 } from "./lib/backendApi";
 import { fetchGapReports, subscribeGapReports, type GapReport } from "./lib/gapReports";
+import { useTheme } from "./lib/theme";
 
 type PreferenceKey = "sidewalks" | "safety" | "comfort";
 const DOTS = 5;
@@ -219,7 +219,7 @@ export default function Home() {
   const [routeRequest, setRouteRequest] = useState(0);
   const [routeStatus, setRouteStatus] = useState<RouteStatus>("idle");
   const [selectedRoute, setSelectedRoute] = useState<RouteChoice>("safe");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const { theme } = useTheme();
   const [gapReports, setGapReports] = useState<GapReport[]>([]);
   const hasRequestedRouteRef = useRef(false);
   // Both routes from the backend, keyed by the safe/default toggle.
@@ -375,7 +375,7 @@ export default function Home() {
 
   return (
     <main className={`app-shell ${theme === "dark" ? "dark-mode" : ""}`}>
-      <Nav theme={theme} onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} />
+      <Nav />
       <section className="workspace">
         <aside className="sidebar">
           <div className="sidebar-card">
@@ -585,53 +585,6 @@ function SnapSlider({
         })}
       </div>
     </div>
-  );
-}
-
-function Nav({
-  theme,
-  onToggleTheme
-}: {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-}) {
-  return (
-    <nav className="nav">
-      <div className="brand">
-        <span><Footprints size={21} /></span>
-        Safewalk
-      </div>
-      <div className="nav-links">
-        <Link className="active" href="/">Map</Link>
-        <Link href="/status">Status</Link>
-        <Link href="/about">About</Link>
-      </div>
-      <button className={`theme-toggle ${theme === "dark" ? "is-dark" : ""}`} onClick={onToggleTheme} type="button">
-        <svg
-          aria-hidden="true"
-          className="theme-toggle-icon"
-          fill="currentColor"
-          strokeLinecap="round"
-          viewBox="0 0 32 32"
-        >
-          <g>
-            <circle className="theme-toggle-core" cx="16" cy="16" />
-            <circle className="theme-toggle-cutout" cx="21" cy="11" r="8" />
-            <g className="theme-toggle-rays" stroke="currentColor" strokeWidth="1.5">
-              <path d="M16 5.5v-4" />
-              <path d="M16 30.5v-4" />
-              <path d="M1.5 16h4" />
-              <path d="M26.5 16h4" />
-              <path d="m23.4 8.6 2.8-2.8" />
-              <path d="m5.7 26.3 2.9-2.9" />
-              <path d="m5.8 5.8 2.8 2.8" />
-              <path d="m23.4 23.4 2.9 2.9" />
-            </g>
-          </g>
-        </svg>
-        {theme === "dark" ? "Light" : "Dark"}
-      </button>
-    </nav>
   );
 }
 
