@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import Nav from "../components/Nav";
+import { useTheme } from "../lib/theme";
 import {
   fetchGapReports,
   gapTypeMeta,
@@ -16,12 +17,25 @@ import {
 } from "../lib/gapReports";
 
 export default function StatusPage() {
+  const { theme } = useTheme();
+  const dark = theme === "dark";
+  const palette = {
+    pageBg: dark ? "#101614" : "#f5f3ee",
+    cardBg: dark ? "#171d1a" : "#fff",
+    cardBorder: dark ? "#2a322d" : "#e5e5df",
+    heading: dark ? "#f1f3ef" : "#1a1a1a",
+    note: dark ? "#c3cac3" : "#666",
+    meta: dark ? "#7f8a82" : "#aaa",
+    muted: dark ? "#8a948c" : "#888"
+  };
+
   const [reports, setReports] = useState<GapReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  // Prepopulate from Supabase (via the backend, falling back to a direct read).
+  // Prepopulate from Supabase (via the backend, falling back to a direct read),
+  // then keep the list live as new reports are created / their status changes.
   useEffect(() => {
     let active = true;
     fetchGapReports().then((rows) => {
@@ -30,10 +44,15 @@ export default function StatusPage() {
       setLoading(false);
     });
 
-    // Keep the list live: new reports stream in as pins are created.
-    const unsubscribe = subscribeGapReports((report) => {
+    const unsubscribe = subscribeGapReports((report, event) => {
       if (!active) return;
-      setReports((current) => [report, ...current.filter((r) => r.id !== report.id)]);
+      setReports((current) => {
+        if (event === "UPDATE") {
+          // Update in place so a status change doesn't reorder the list.
+          return current.map((r) => (r.id === report.id ? { ...r, ...report } : r));
+        }
+        return [report, ...current.filter((r) => r.id !== report.id)];
+      });
     });
 
     return () => {
@@ -59,11 +78,11 @@ export default function StatusPage() {
   );
 
   return (
-    <div style={{ height: "100dvh", overflowY: "auto" }}>
+    <div style={{ height: "100dvh", overflowY: "auto", background: palette.pageBg }}>
       <Nav />
       <main style={{ maxWidth: 880, margin: "0 auto", padding: "32px 20px", fontFamily: "inherit" }}>
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12 }}>
-          <h1 style={{ fontSize: 24, margin: 0 }}>Reports</h1>
+          <h1 style={{ fontSize: 24, margin: 0, color: palette.heading }}>Reports</h1>
           <Link
             href="/report"
             style={{
@@ -80,12 +99,12 @@ export default function StatusPage() {
           </Link>
         </header>
 
-        {error && <p style={{ color: "#c0392b", fontSize: 13 }}>{error}</p>}
+        {error && <p style={{ color: "#e0584a", fontSize: 13 }}>{error}</p>}
 
         {loading ? (
-          <p style={{ color: "#888" }}>Loading reports…</p>
+          <p style={{ color: palette.muted }}>Loading reports…</p>
         ) : reports.length === 0 ? (
-          <p style={{ color: "#888" }}>No gap reports yet.</p>
+          <p style={{ color: palette.muted }}>No gap reports yet.</p>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
             {reports.map((report) => {
@@ -100,14 +119,14 @@ export default function StatusPage() {
                     justifyContent: "space-between",
                     gap: 16,
                     padding: "12px 16px",
-                    border: "1px solid #e5e5df",
+                    border: `1px solid ${palette.cardBorder}`,
                     borderRadius: 12,
-                    background: "#fff"
+                    background: palette.cardBg
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <strong style={{ fontSize: 14 }}>{type.label}</strong>
+                      <strong style={{ fontSize: 14, color: palette.heading }}>{type.label}</strong>
                       <span
                         style={{
                           padding: "1px 8px",
@@ -121,10 +140,10 @@ export default function StatusPage() {
                         {status.label}
                       </span>
                     </div>
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                    <div style={{ fontSize: 12, color: palette.note, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
                       {report.note || "—"}
                     </div>
-                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: palette.meta, marginTop: 2 }}>
                       {report.reported_at ? new Date(report.reported_at).toLocaleString() : ""}
                     </div>
                   </div>

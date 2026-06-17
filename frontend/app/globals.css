@@ -1941,3 +1941,47 @@ button:disabled {
     min-height: 280px;
   }
 }
+
+/* ── Dark mode: About page ─────────────────────────────────────────────────── */
+.dark-mode .about-page-shell {
+  background: #101614;
+  color: #e8eae6;
+}
+
+.dark-mode .about-hero-copy,
+.dark-mode .about-card,
+.dark-mode .about-side-image,
+.dark-mode .about-hero-image {
+  background: #171d1a;
+  border-color: #2a322d;
+}
+
+.dark-mode .about-hero-copy {
+  background:
+    radial-gradient(circle at top right, rgba(45, 122, 94, 0.28), transparent 44%),
+    linear-gradient(180deg, #171d1a 0%, #131815 100%);
+}
+
+.dark-mode .about-hero-copy p,
+.dark-mode .about-kicker {
+  color: #5ec79b;
+}
+
+.dark-mode .about-hero-copy h1,
+.dark-mode .about-copy-card h2,
+.dark-mode .about-source-card h3 {
+  color: #f1f3ef;
+}
+
+.dark-mode .about-hero-copy span {
+  color: #aab4ab;
+}
+
+.dark-mode .about-prose p,
+.dark-mode .about-source-card ul {
+  color: #c3cac3;
+}
+
+.dark-mode .about-prose em {
+  color: #e8eae6;
+}

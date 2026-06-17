@@ -74,9 +74,12 @@ export async function fetchGapReports(): Promise<GapReport[]> {
   return (data ?? []).filter((r): r is GapReport => r.lng != null && r.lat != null);
 }
 
-// Subscribe to live INSERTs so newly reported pins appear on every open map in ~1s.
+// Subscribe to live changes so newly reported pins appear (INSERT) and status
+// changes recolor existing pins (UPDATE) on every open client in ~1s.
 // Returns an unsubscribe function.
-export function subscribeGapReports(onInsert: (report: GapReport) => void): () => void {
+export function subscribeGapReports(
+  onChange: (report: GapReport, event: "INSERT" | "UPDATE") => void
+): () => void {
   const supabase = getSupabase();
   if (!supabase) return () => {};
 
@@ -84,12 +87,13 @@ export function subscribeGapReports(onInsert: (report: GapReport) => void): () =
     .channel("gap_reports_live")
     .on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "gap_reports" },
+      { event: "*", schema: "public", table: "gap_reports" },
       (payload) => {
+        if (payload.eventType !== "INSERT" && payload.eventType !== "UPDATE") return;
         const raw = payload.new as Partial<GapReport> & { id: string | number };
         if (raw?.lng == null || raw?.lat == null) return;
         // Normalize id to a string so it dedupes against backend-fetched rows.
-        onInsert({ ...(raw as GapReport), id: String(raw.id) });
+        onChange({ ...(raw as GapReport), id: String(raw.id) }, payload.eventType);
       }
     )
     .subscribe();
